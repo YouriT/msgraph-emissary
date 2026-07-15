@@ -45,16 +45,40 @@ interface Ctx {
 // Prompting
 // --------------------------------------------------------------------------
 
+/** The one readline method these prompts need — kept minimal so it's trivial to fake in tests. */
+export interface Asker {
+  question(prompt: string): Promise<string>;
+}
+
+/** Re-prompt until a non-empty answer is given — a required field is never silently accepted empty. */
+export async function askRequired(rl: Asker, prompt: string): Promise<string> {
+  for (;;) {
+    const answer = (await rl.question(`${prompt} (required): `)).trim();
+    if (answer.length > 0) return answer;
+    printErrLine("  This field is required — please enter a value.");
+  }
+}
+
+/** Like askRequired, but also requires the answer to look like an email address. */
+export async function askRequiredEmail(rl: Asker, prompt: string): Promise<string> {
+  for (;;) {
+    const answer = await askRequired(rl, prompt);
+    if (answer.includes("@")) return answer;
+    printErrLine(`  "${answer}" doesn't look like an email address — must contain "@".`);
+  }
+}
+
 async function collectInteractive(): Promise<Config> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
     printErrLine("\n=== Emissary onboarding: collect configuration ===");
-    const tenantId = (await rl.question("Entra tenant ID (GUID or domain): ")).trim();
-    const clientId = (await rl.question("App (client) ID: ")).trim();
-    const mailbox = (await rl.question("Shared mailbox address (e.g. agent@contoso.com): ")).trim();
-    const allowlistGroup = (
-      await rl.question("Allowlist group address (e.g. emissary-allowed@contoso.com): ")
-    ).trim();
+    const tenantId = await askRequired(rl, "Entra tenant ID (GUID or domain)");
+    const clientId = await askRequired(rl, "App (client) ID");
+    const mailbox = await askRequiredEmail(rl, "Shared mailbox address (e.g. agent@contoso.com)");
+    const allowlistGroup = await askRequiredEmail(
+      rl,
+      "Allowlist group address (e.g. emissary-allowed@contoso.com)",
+    );
     const negative = (
       await rl.question("Negative-test mailbox (optional, a mailbox the app must NOT reach): ")
     ).trim();
