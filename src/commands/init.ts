@@ -68,6 +68,18 @@ export async function askRequiredEmail(rl: Asker, prompt: string): Promise<strin
   }
 }
 
+/** Yes/no prompt with a default on empty input (Enter). */
+export async function askYesNo(rl: Asker, prompt: string, defaultValue: boolean): Promise<boolean> {
+  const suffix = defaultValue ? "[Y/n]" : "[y/N]";
+  for (;;) {
+    const answer = (await rl.question(`${prompt} ${suffix}: `)).trim().toLowerCase();
+    if (answer === "") return defaultValue;
+    if (answer === "y" || answer === "yes") return true;
+    if (answer === "n" || answer === "no") return false;
+    printErrLine('  Please answer "y" or "n".');
+  }
+}
+
 async function collectInteractive(): Promise<Config> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
@@ -75,10 +87,18 @@ async function collectInteractive(): Promise<Config> {
     const tenantId = await askRequired(rl, "Entra tenant ID (GUID or domain)");
     const clientId = await askRequired(rl, "App (client) ID");
     const mailbox = await askRequiredEmail(rl, "Shared mailbox address (e.g. agent@contoso.com)");
-    const allowlistGroup = await askRequiredEmail(
-      rl,
-      "Allowlist group address (e.g. emissary-allowed@contoso.com)",
-    );
+
+    printErrLine("\nReading mail is always enabled. Choose any extra capabilities this identity needs:");
+    const move = await askYesNo(rl, "  Allow moving messages between folders?", false);
+    const send = await askYesNo(rl, "  Allow sending mail (send/reply/forward)?", false);
+
+    let allowlistGroup: string | undefined;
+    if (send) {
+      allowlistGroup = await askRequiredEmail(
+        rl,
+        "Allowlist group address (e.g. emissary-allowed@contoso.com)",
+      );
+    }
     const negative = (
       await rl.question("Negative-test mailbox (optional, a mailbox the app must NOT reach): ")
     ).trim();
@@ -87,10 +107,11 @@ async function collectInteractive(): Promise<Config> {
       tenantId,
       clientId,
       mailbox,
-      allowlistGroup,
+      capabilities: { move, send },
       certPath: defaultCertPath(),
       keyPath: defaultKeyPath(),
     };
+    if (allowlistGroup) cfg.allowlistGroup = allowlistGroup;
     if (negative.length > 0) cfg.negativeTestMailbox = negative;
     return validateConfig(cfg);
   } finally {

@@ -9,6 +9,23 @@ means and how to do it by hand.
 
 ---
 
+## 0. Choose capabilities (operator)
+
+Reading mail is always on — it's the point of the identity. Everything past
+that is opt-in, and it changes what the rest of this walkthrough actually
+requires:
+
+| Capability | Unlocks | Exchange RBAC role | Extra admin work |
+|---|---|---|---|
+| `read` (always on) | `inbox`/`unread`/`search`/`read`/`folders`/`stats`/`attachments`/`download` | `Application Mail.Read` | none |
+| `move` | `move` | upgrades to `Application Mail.ReadWrite` | none |
+| `send` | `send`/`reply`/`forward` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
+
+A read-only identity (`move` and `send` both off) skips step 7 entirely, only
+ever needs `Mail.Read` granted in step 4, and never sees an allowlist. The
+examples below show the **full** (`move` + `send`) case; drop what you don't
+need.
+
 ## 1. Create the shared mailbox (admin)
 
 ```powershell
@@ -43,20 +60,21 @@ SHA-256 thumbprint in Entra matches the one `init` printed.
 
 ## 4. Grant Graph application permissions (admin consent)
 
-Entra → your app → **API permissions** → add these **Application** permissions,
-then **Grant admin consent**:
+Entra → your app → **API permissions** → add the permissions for the
+capabilities you chose in step 0, then **Grant admin consent**:
 
-| Permission | Why Emissary needs it |
-|---|---|
-| `Mail.ReadWrite` | Read/move/mark messages in the mailbox (narrowed by RBAC in step 6). |
-| `Mail.Send` | Send/reply/forward from the mailbox (narrowed by RBAC). |
-| `Group.Read.All` | Look up the allowlist group by its mail address. |
-| `GroupMember.Read.All` | Read the group's transitive membership (the allowlist). |
-| `User.ReadBasic.All` | Resolve member users' email/UPN. |
-| `OrgContact.Read.All` | Resolve mail-contact members of the group. |
+| Permission | Needed for | Why Emissary needs it |
+|---|---|---|
+| `Mail.Read` | always | Read messages in the mailbox (narrowed by RBAC in step 6). |
+| `Mail.ReadWrite` | `move` | Move/mark messages — supersedes `Mail.Read` above; grant one or the other, not both. |
+| `Mail.Send` | `send` | Send/reply/forward from the mailbox (narrowed by RBAC). |
+| `Group.Read.All` | `send` | Look up the allowlist group by its mail address. |
+| `GroupMember.Read.All` | `send` | Read the group's transitive membership (the allowlist). |
+| `User.ReadBasic.All` | `send` | Resolve member users' email/UPN. |
+| `OrgContact.Read.All` | `send` | Resolve mail-contact members of the group. |
 
-> `Mail.ReadWrite` / `Mail.Send` are tenant-wide *until* the Exchange RBAC scope
-> in step 6 restricts them to the single mailbox. Do both.
+> Whichever Mail.* permission you grant is tenant-wide *until* the Exchange
+> RBAC scope in step 6 restricts it to the single mailbox. Do both.
 
 ## 5. ⚠️ The Object-ID pitfall (read this before step 6)
 
@@ -89,7 +107,11 @@ Set-Mailbox -Identity agent@contoso.com -CustomAttribute15 "emissary-agent"
 # 6c. Management scope: matches ONLY mailboxes carrying that tag
 New-ManagementScope -Name "Emissary-agent-Scope" -RecipientRestrictionFilter "CustomAttribute15 -eq 'emissary-agent'"
 
-# 6d. Scoped role assignments — the app's Mail.* now apply to the tagged mailbox only
+# 6d. Scoped role assignment(s) — the app's Mail.* now apply to the tagged mailbox only.
+#     Pick the role(s) matching step 0's capability choice:
+#       read-only  -> "Application Mail.Read" only
+#       move       -> "Application Mail.ReadWrite" instead of Mail.Read
+#       send       -> also add "Application Mail.Send"
 New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailReadWrite" -App <CLIENT_ID> -Role "Application Mail.ReadWrite" -CustomResourceScope "Emissary-agent-Scope"
 New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailSend"      -App <CLIENT_ID> -Role "Application Mail.Send"      -CustomResourceScope "Emissary-agent-Scope"
 ```
@@ -97,7 +119,7 @@ New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailSend"      -Ap
 **Do not use Application Access Policies** — they are deprecated. Exchange RBAC
 for Applications (above) is the supported mechanism.
 
-## 7. Allowlist group + transport rule (admin)
+## 7. Allowlist group + transport rule (admin) — only if `send` is enabled
 
 ```powershell
 # Outbound allowlist: membership = who Emissary may email
@@ -118,8 +140,9 @@ emissary doctor
 ```
 
 `doctor` acquires a token, reads the target mailbox, runs the **negative test**
-(reading a mailbox it must not reach — expects `403`), and resolves the
-allowlist. All green means both planes are enforced.
+(reading a mailbox it must not reach — expects `403`, if a negative-test
+mailbox was configured), and — only if `send` is enabled — resolves the
+allowlist. All green means the configured capabilities are enforced as scoped.
 
 ## Notes
 

@@ -5,7 +5,10 @@
  * Templates are imported as text (Bun import attributes), so they are embedded
  * in the compiled single binary — no runtime path dependency on the repo.
  * Placeholders are `{{NAME}}`; every one must have a value or rendering throws
- * (so we never ship a half-filled pack).
+ * (so we never ship a half-filled pack). `{{#FLAG}}...{{/FLAG}}` wraps a block
+ * that's included only when that capability is enabled — used so a read-only
+ * identity's admin pack never mentions Mail.Send, the allowlist group, or the
+ * transport rule at all, rather than just saying "not needed" around them.
  */
 
 import { mkdir } from "node:fs/promises";
@@ -38,11 +41,37 @@ export interface RenderValues {
   ALLOWLIST_GROUP: string;
   TRANSPORT_RULE_NAME: string;
   THUMBPRINT: string;
+  /** e.g. "'Application Mail.Read'" or "'Application Mail.ReadWrite', 'Application Mail.Send'". */
+  MAIL_ROLES_PS_ARRAY: string;
+  /** e.g. "Mail.Read" or "Mail.ReadWrite, Mail.Send" — for the Graph-permission list. */
+  MAIL_GRAPH_PERMISSIONS: string;
+  /** e.g. "read" / "read, move" / "read, move, send". */
+  CAPABILITIES_SUMMARY: string;
+}
+
+export interface RenderFlags {
+  MOVE: boolean;
+  SEND: boolean;
+  /** Convenience negation of SEND — templates can't express `{{^SEND}}`, only `{{#FLAG}}`. */
+  SEND_DISABLED: boolean;
 }
 
 /** Compute the full set of substitution values from config + cert thumbprint. */
 export function deriveValues(cfg: Config, thumbprint: string): RenderValues {
   const s = slug(cfg.mailbox);
+  const { move, send } = cfg.capabilities;
+
+  const mailRoles = [move ? "Application Mail.ReadWrite" : "Application Mail.Read"];
+  const mailGraphPerms = [move ? "Mail.ReadWrite" : "Mail.Read"];
+  if (send) {
+    mailRoles.push("Application Mail.Send");
+    mailGraphPerms.push("Mail.Send");
+  }
+
+  const capSummary = ["read", move ? "move" : undefined, send ? "send" : undefined]
+    .filter((c): c is string => Boolean(c))
+    .join(", ");
+
   return {
     TENANT_ID: cfg.tenantId,
     CLIENT_ID: cfg.clientId,
@@ -53,22 +82,46 @@ export function deriveValues(cfg: Config, thumbprint: string): RenderValues {
     SCOPE_NAME: `Emissary-${s}-Scope`,
     CUSTOM_ATTR: "CustomAttribute15",
     CUSTOM_ATTR_VALUE: `emissary-${s}`,
-    ALLOWLIST_GROUP: cfg.allowlistGroup,
+    ALLOWLIST_GROUP: cfg.allowlistGroup ?? "",
     TRANSPORT_RULE_NAME: `Emissary-Outbound-${s}`,
     THUMBPRINT: thumbprint,
+    MAIL_ROLES_PS_ARRAY: mailRoles.map((r) => `'${r}'`).join(", "),
+    MAIL_GRAPH_PERMISSIONS: mailGraphPerms.join(", "),
+    CAPABILITIES_SUMMARY: capSummary,
   };
 }
 
-/** Replace every `{{KEY}}` in `template`; throw if any placeholder is left. */
-export function fillTemplate(template: string, values: Record<string, string>): string {
-  const out = template.replace(/\{\{([A-Z_]+)\}\}/g, (_m, key: string) => {
+export function deriveFlags(cfg: Config): RenderFlags {
+  return { MOVE: cfg.capabilities.move, SEND: cfg.capabilities.send, SEND_DISABLED: !cfg.capabilities.send };
+}
+
+/**
+ * Render a template: strip `{{#FLAG}}...{{/FLAG}}` blocks based on `flags`,
+ * then substitute every `{{KEY}}` from `values`. Throws if a flag/value is
+ * missing, or if any `{{...}}` syntax remains unresolved — we never ship a
+ * half-filled pack.
+ */
+export function fillTemplate(
+  template: string,
+  values: Record<string, string>,
+  flags: Record<string, boolean> = {},
+): string {
+  let out = template.replace(/\{\{#([A-Z_]+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_m, key: string, body: string) => {
+    if (!(key in flags)) {
+      throw new Error(`template flag {{#${key}}} has no value`);
+    }
+    return flags[key] ? body : "";
+  });
+  out = out.replace(/\{\{([A-Z_]+)\}\}/g, (_m, key: string) => {
     if (!(key in values)) {
       throw new Error(`template placeholder {{${key}}} has no value`);
     }
     return values[key]!;
   });
-  const leftover = out.match(/\{\{[A-Z_]+\}\}/);
-  if (leftover) throw new Error(`unresolved placeholder after render: ${leftover[0]}`);
+  if (out.includes("{{")) {
+    const leftover = out.match(/\{\{[^}]*\}\}/)?.[0] ?? "{{...}}";
+    throw new Error(`unresolved template syntax after render: ${leftover}`);
+  }
   return out;
 }
 
@@ -80,8 +133,9 @@ export interface RenderedPack {
 /** Render both files into the admin handoff dir and return their paths. */
 export async function renderAdminPack(cfg: Config, thumbprint: string): Promise<RenderedPack> {
   const values = deriveValues(cfg, thumbprint) as unknown as Record<string, string>;
-  const ps1 = fillTemplate(ps1Template, values);
-  const adminMd = fillTemplate(adminMdTemplate, values);
+  const flags = deriveFlags(cfg) as unknown as Record<string, boolean>;
+  const ps1 = fillTemplate(ps1Template, values, flags);
+  const adminMd = fillTemplate(adminMdTemplate, values, flags);
 
   const dir = adminHandoffDir();
   await mkdir(dir, { recursive: true, mode: 0o700 });

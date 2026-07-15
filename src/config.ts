@@ -12,7 +12,7 @@
 import { chmod, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Config } from "./types.ts";
+import type { Capabilities, Config } from "./types.ts";
 
 const APP = "emissary";
 
@@ -58,7 +58,16 @@ export async function ensureStateDir(): Promise<void> {
   await chmod(stateDir(), 0o700).catch(() => {});
 }
 
-const REQUIRED_STRING_FIELDS: (keyof Config)[] = ["tenantId", "clientId", "mailbox", "allowlistGroup"];
+const REQUIRED_STRING_FIELDS: (keyof Config)[] = ["tenantId", "clientId", "mailbox"];
+
+/** Capability flags default to `false` (read-only) unless explicitly `true`. */
+function parseCapabilities(raw: unknown): Capabilities {
+  const obj = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+  return {
+    move: obj.move === true,
+    send: obj.send === true,
+  };
+}
 
 /**
  * Validate a parsed object into a Config. Throws with a precise message on the
@@ -80,6 +89,22 @@ export function validateConfig(raw: unknown): Config {
   if (!mailbox.includes("@")) {
     throw new Error(`config field "mailbox" must be an email address, got "${mailbox}"`);
   }
+  const capabilities = parseCapabilities(obj.capabilities);
+
+  // The allowlist is only meaningful — and only required — when this identity
+  // can send. A read-only identity never needs one, never gets the extra
+  // Graph permissions, and never triggers the allowlist onboarding gate.
+  let allowlistGroup: string | undefined;
+  const rawAllowlist = obj.allowlistGroup;
+  if (capabilities.send) {
+    if (typeof rawAllowlist !== "string" || rawAllowlist.trim().length === 0) {
+      throw new Error('config field "allowlistGroup" is required when capabilities.send is true');
+    }
+    allowlistGroup = rawAllowlist.trim();
+  } else if (typeof rawAllowlist === "string" && rawAllowlist.trim().length > 0) {
+    allowlistGroup = rawAllowlist.trim();
+  }
+
   const certPath =
     typeof obj.certPath === "string" && obj.certPath.trim().length > 0
       ? String(obj.certPath).trim()
@@ -92,10 +117,11 @@ export function validateConfig(raw: unknown): Config {
     tenantId: String(obj.tenantId).trim(),
     clientId: String(obj.clientId).trim(),
     mailbox: mailbox.trim(),
-    allowlistGroup: String(obj.allowlistGroup).trim(),
+    capabilities,
     certPath,
     keyPath,
   };
+  if (allowlistGroup) cfg.allowlistGroup = allowlistGroup;
   const neg = obj.negativeTestMailbox;
   if (typeof neg === "string" && neg.trim().length > 0) {
     cfg.negativeTestMailbox = neg.trim();

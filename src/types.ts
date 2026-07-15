@@ -11,6 +11,21 @@
 // Config & state (on disk)
 // ---------------------------------------------------------------------------
 
+/**
+ * What this identity is allowed to do beyond reading mail. Reading is always
+ * on — it's the point of the identity, and `doctor`'s negative test needs it
+ * regardless. Each flag maps 1:1 to an Exchange RBAC application role, so
+ * disabling one means the admin never has to grant it:
+ *   move -> upgrades the mail role from `Application Mail.Read` to
+ *           `Application Mail.ReadWrite` (moving a message is a write).
+ *   send -> adds `Application Mail.Send`, the allowlist group, and the
+ *           transport rule. Requires `allowlistGroup` to be set.
+ */
+export interface Capabilities {
+  move: boolean;
+  send: boolean;
+}
+
 /** Persistent, operator-owned configuration. Lives at $XDG_CONFIG_HOME/emissary/config.json. */
 export interface Config {
   /** Entra tenant (GUID or verified domain). */
@@ -19,8 +34,10 @@ export interface Config {
   clientId: string;
   /** The shared mailbox this identity is scoped to, e.g. agent@contoso.com. Never `/me`. */
   mailbox: string;
-  /** Mail-enabled group whose membership is the outbound allowlist. */
-  allowlistGroup: string;
+  /** What this identity may do beyond reading mail. */
+  capabilities: Capabilities;
+  /** Mail-enabled group whose membership is the outbound allowlist. Required iff capabilities.send. */
+  allowlistGroup?: string;
   /** Path to the PEM certificate (public) uploaded to Entra. */
   certPath: string;
   /** Path to the PEM private key (chmod 600). Signs the client assertion. */

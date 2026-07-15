@@ -7,7 +7,7 @@
  */
 
 import { expect, test } from "bun:test";
-import { type Asker, askRequired, askRequiredEmail } from "../src/commands/init.ts";
+import { type Asker, askRequired, askRequiredEmail, askYesNo } from "../src/commands/init.ts";
 
 function fakeAsker(answers: string[]): Asker {
   let i = 0;
@@ -30,4 +30,12 @@ test("askRequiredEmail re-prompts on blank AND on non-email input", async () => 
   const rl = fakeAsker(["", "not-an-email", "emissary-allowed@contoso.com"]);
   const answer = await askRequiredEmail(rl, "Allowlist group address");
   expect(answer).toBe("emissary-allowed@contoso.com");
+});
+
+test("askYesNo: empty input takes the default, y/n are parsed, invalid input re-prompts", async () => {
+  const rl = fakeAsker(["", "Y", "n", "nope", "y"]);
+  expect(await askYesNo(rl, "Allow moving messages?", false)).toBe(false); // "" -> default
+  expect(await askYesNo(rl, "Allow moving messages?", false)).toBe(true); // "Y"
+  expect(await askYesNo(rl, "Allow sending mail?", true)).toBe(false); // "n"
+  expect(await askYesNo(rl, "Allow sending mail?", false)).toBe(true); // "nope" (invalid) then "y"
 });

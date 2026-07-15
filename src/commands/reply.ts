@@ -36,6 +36,10 @@ export async function replyCommand(args: string[]): Promise<number> {
     return 1;
   }
   const cfg = await loadConfig();
+  if (!cfg.capabilities.send || !cfg.allowlistGroup) {
+    printJson(errorResult("sending is disabled for this identity (capabilities.send is not enabled)"));
+    return 1;
+  }
   const graph = await Graph.create(cfg);
   const id = await resolveMessageId(graph, cfg, given);
 

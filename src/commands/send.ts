@@ -33,6 +33,10 @@ export async function sendCommand(args: string[]): Promise<number> {
   }
 
   const cfg = await loadConfig();
+  if (!cfg.capabilities.send || !cfg.allowlistGroup) {
+    printJson(errorResult("sending is disabled for this identity (capabilities.send is not enabled)"));
+    return 1;
+  }
   const graph = await Graph.create(cfg);
 
   // --- Preflight: mandatory, pre-submission ---

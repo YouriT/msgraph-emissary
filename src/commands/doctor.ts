@@ -3,10 +3,11 @@
  *
  * Runs four probes and reports a compact posture summary:
  *   1. token     — can we mint an app-only token at all?
- *   2. read      — can we read the TARGET mailbox? (Mail.ReadWrite assignment)
+ *   2. read      — can we read the TARGET mailbox? (Mail.Read/ReadWrite assignment)
  *   3. negative  — are we correctly BLOCKED from a mailbox we shouldn't reach?
  *                  A 403 is a PASS; a 200 is a FAIL (RBAC scope too broad).
  *   4. allowlist — does the outbound allowlist group resolve via Graph?
+ *                  Skipped (not a failure) when capabilities.send is disabled.
  *
  * Exit code is non-zero if any hard check fails, so it can gate onboarding and
  * CI. Individual probes are exported so the init wizard can reuse them as gates.
@@ -80,8 +81,15 @@ export async function probeNegative(graph: Graph, cfg: Config): Promise<Check> {
   };
 }
 
-/** Probe 4: allowlist group resolves. */
+/** Probe 4: allowlist group resolves. Not applicable when send is disabled — nothing to check. */
 export async function probeAllowlist(graph: Graph, cfg: Config): Promise<Check> {
+  if (!cfg.capabilities.send || !cfg.allowlistGroup) {
+    return {
+      name: "allowlist",
+      status: "skip",
+      detail: "capabilities.send is disabled — this identity cannot send, so there is no allowlist to check",
+    };
+  }
   try {
     const resolved = await resolveAllowlist(graph, cfg.allowlistGroup);
     return {

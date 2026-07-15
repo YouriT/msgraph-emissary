@@ -6,22 +6,24 @@
   file with the operator's real values filled in, so you can run it (or read it)
   directly instead of transcribing steps.
 
+  This identity's capabilities: {{CAPABILITIES_SUMMARY}}.
+
   What this does (and does NOT do):
     - Scopes the Entra app to exactly ONE shared mailbox using Exchange RBAC for
       Applications (service principal + management scope on a custom attribute +
       role assignments). This is the modern replacement for the deprecated
       Application Access Policies — do not use those.
-    - Adds a transport rule as a hard, admin-side outbound boundary.
+{{#SEND}}    - Adds a transport rule as a hard, admin-side outbound boundary.
     - Ensures the outbound allowlist group exists.
-
+{{/SEND}}
   It does NOT create the app registration or upload the certificate — the
   operator does that in Entra (see ADMIN.md). It does NOT grant Graph API
   application permissions — an admin must consent to those in Entra:
-      Mail.ReadWrite, Mail.Send  (mailbox access — but Exchange RBAC below
-                                  narrows these to the one mailbox),
-      GroupMember.Read.All, Group.Read.All, User.ReadBasic.All,
-      OrgContact.Read.All        (allowlist resolution).
-
+      {{MAIL_GRAPH_PERMISSIONS}}  (mailbox access — but Exchange RBAC below
+                                  narrows these to the one mailbox)
+{{#SEND}}      GroupMember.Read.All, Group.Read.All, User.ReadBasic.All,
+      OrgContact.Read.All        (allowlist resolution)
+{{/SEND}}
   Every step is guarded so re-running is safe (idempotent).
   ============================================================================
 #>
@@ -45,6 +47,7 @@ $TransportRuleName    = '{{TRANSPORT_RULE_NAME}}'
 $CertThumbprint       = '{{THUMBPRINT}}'          # for your records / audit
 
 Write-Host "== Emissary admin setup for $Mailbox ==" -ForegroundColor Cyan
+Write-Host "   Capabilities: {{CAPABILITIES_SUMMARY}}" -ForegroundColor Cyan
 
 # --- 0. Connect -------------------------------------------------------------
 # Requires the ExchangeOnlineManagement module: Install-Module ExchangeOnlineManagement
@@ -81,10 +84,11 @@ if (-not $scope) {
   Write-Host "Management scope already exists: $ScopeName"
 }
 
-# --- 4. Role assignments (Mail.ReadWrite + Mail.Send, scoped) ---------------
+# --- 4. Role assignment(s), scoped ------------------------------------------
 # These are the Exchange RBAC application roles, constrained to $ScopeName, so
-# the app's Graph Mail.* permissions only apply to the tagged mailbox.
-foreach ($role in @('Application Mail.ReadWrite', 'Application Mail.Send')) {
+# the app's Graph Mail.* permissions only apply to the tagged mailbox. Which
+# roles are assigned depends on this identity's capabilities ({{CAPABILITIES_SUMMARY}}):
+foreach ($role in @({{MAIL_ROLES_PS_ARRAY}})) {
   $asgName = "$AppDisplayName-$($role -replace '[^A-Za-z0-9]', '')"
   $existing = Get-ManagementRoleAssignment -Identity $asgName -ErrorAction SilentlyContinue
   if (-not $existing) {
@@ -94,7 +98,7 @@ foreach ($role in @('Application Mail.ReadWrite', 'Application Mail.Send')) {
     Write-Host "Role assignment already exists: $asgName"
   }
 }
-
+{{#SEND}}
 # --- 5. Allowlist group (outbound preflight source of truth) ----------------
 $grp = Get-DistributionGroup -Identity $AllowlistGroup -ErrorAction SilentlyContinue
 if (-not $grp) {
@@ -119,8 +123,13 @@ if (-not $rule) {
 } else {
   Write-Host "Transport rule already exists: $TransportRuleName"
 }
-
+{{/SEND}}
+{{#SEND_DISABLED}}
+# --- 5-6. Send capability is DISABLED for this identity ---------------------
+# No allowlist group or transport rule were requested — this identity cannot
+# send mail at all. If that changes later, re-run `emissary init`.
+{{/SEND_DISABLED}}
 Write-Host ""
 Write-Host "== Done. Ask the operator to run: emissary doctor ==" -ForegroundColor Green
-Write-Host "   It verifies token acquisition, mailbox read, the negative test," -ForegroundColor Green
-Write-Host "   and allowlist resolution against this configuration." -ForegroundColor Green
+Write-Host "   It verifies token acquisition, mailbox read, and (if configured)" -ForegroundColor Green
+Write-Host "   the negative test{{#SEND}}, plus allowlist resolution{{/SEND}}." -ForegroundColor Green
