@@ -31,7 +31,24 @@ person as the operator).
 - A mail-enabled group whose membership will be the send allowlist (e.g.
   `emissary-allowed@contoso.com`).
 
-### 1. Install and build
+### 1. Get the binary
+
+Download the prebuilt binary for your platform from the
+[latest release](https://github.com/YouriT/msgraph-emissary/releases/latest) —
+no clone or build required:
+
+```bash
+# macOS (Apple Silicon) — swap in emissary-darwin-x64 for Intel Macs,
+# emissary-linux-x64 / emissary-linux-arm64 for Ubuntu
+curl -LO https://github.com/YouriT/msgraph-emissary/releases/latest/download/emissary-darwin-arm64
+chmod +x emissary-darwin-arm64
+mv emissary-darwin-arm64 ./emissary
+```
+
+Each release also publishes a `.sha256` checksum alongside the binary if you
+want to verify the download.
+
+Prefer to build from source instead (or need a version between releases)?
 
 ```bash
 git clone git@github.com:YouriT/msgraph-emissary.git
@@ -42,10 +59,13 @@ bun run build          # -> dist/emissary (single binary)
 
 Or skip the build and run from source during setup: `bun run dev init`.
 
+(The rest of this guide says `./emissary`; if you built from source, that's
+`./dist/emissary`.)
+
 ### 2. Run the onboarding wizard
 
 ```bash
-./dist/emissary init
+./emissary init
 ```
 
 This is a **resumable, interactive wizard** — safe to interrupt and re-run.
@@ -81,7 +101,7 @@ need to run: `setup-admin.ps1`, which is idempotent). They'll need to:
 ### 4. Re-run to verify
 
 ```bash
-./dist/emissary init
+./emissary init
 ```
 
 Once the admin is done, re-running `init` resumes from where it left off and
@@ -92,7 +112,7 @@ assuming success. It finishes with a one-screen security posture summary.
 You can also jump straight to the self-test at any time:
 
 ```bash
-./dist/emissary doctor
+./emissary doctor
 ```
 
 Non-interactive setup (e.g. CI/config-management) is supported via
@@ -102,8 +122,8 @@ see the `Config` fields in [`src/types.ts`](src/types.ts) for the required shape
 ### 5. Use it
 
 ```bash
-./dist/emissary inbox
-./dist/emissary send --to approved@contoso.com --subject "hi" --body "..."
+./emissary inbox
+./emissary send --to approved@contoso.com --subject "hi" --body "..."
 ```
 
 To give an **agent** this mailbox identity, point it at [`SKILL.md`](SKILL.md) —
