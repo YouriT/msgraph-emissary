@@ -9,6 +9,114 @@ app-only, authenticated by a certificate, and never touches `/me`.
 > Mailbox for an autonomous agent." Replaces a personal-mailbox skill that used
 > delegated user auth, a plaintext client secret, and injection-prone shell code.
 
+## Getting started
+
+There are two roles: the **operator** (you — runs this CLI, holds the private
+key on their machine) and an **Exchange Online + Entra admin** (grants
+permissions and runs Exchange RBAC commands; may or may not be the same
+person as the operator).
+
+### Prerequisites
+
+- [Bun](https://bun.sh) ≥ 1.1 — `curl -fsSL https://bun.sh/install | bash`
+- `openssl` on `PATH` (preinstalled on macOS and Ubuntu)
+- A single-tenant Entra **app registration with no client secret**. If you
+  don't have one yet: Entra → *App registrations* → New registration →
+  *Single tenant*. Note the **Application (client) ID** and your **Tenant ID**
+  — `init` will ask for both. (Many orgs let any user register an app; consent
+  to permissions is what's admin-gated, in step 4 below.)
+- A shared mailbox (e.g. `agent@contoso.com`) — no license, no interactive
+  sign-in. Ask your admin to create one if it doesn't exist:
+  `New-Mailbox -Shared -Name "Agent Mailbox" -PrimarySmtpAddress agent@contoso.com`
+- A mail-enabled group whose membership will be the send allowlist (e.g.
+  `emissary-allowed@contoso.com`).
+
+### 1. Install and build
+
+```bash
+git clone git@github.com:YouriT/msgraph-emissary.git
+cd msgraph-emissary
+bun install
+bun run build          # -> dist/emissary (single binary)
+```
+
+Or skip the build and run from source during setup: `bun run dev init`.
+
+### 2. Run the onboarding wizard
+
+```bash
+./dist/emissary init
+```
+
+This is a **resumable, interactive wizard** — safe to interrupt and re-run.
+Each time, it picks up at the first incomplete step:
+
+1. **Prereqs** — checks `openssl` is on `PATH` and that Microsoft's login/Graph
+   endpoints are reachable.
+2. **Collect** — prompts for tenant ID, client ID, mailbox address, allowlist
+   group address, and (optionally) a "negative test" mailbox the app should
+   *never* be able to reach.
+3. **Cert** — generates an RSA-4096 self-signed certificate locally and prints
+   exactly what to upload to Entra (file + SHA-256 thumbprint). The private
+   key never leaves your machine.
+4. **Render handoff** — writes a filled-in `setup-admin.ps1` + `ADMIN.md` under
+   `~/.config/emissary/admin/` with your real values already substituted in.
+   **Send those two files to your Exchange/Entra admin** and stop here.
+
+At this point `init` will report it's paused waiting on the admin. That's expected.
+
+### 3. Hand off to your admin
+
+Send them `ADMIN.md` (it explains everything, including the one command they
+need to run: `setup-admin.ps1`, which is idempotent). They'll need to:
+
+- Confirm the app registration and uploaded certificate,
+- Grant admin consent for the Graph application permissions listed in `ADMIN.md`,
+- Find the **Enterprise Application Object ID** (not the client ID, not the app
+  registration's own Object ID — see the pitfall callout in
+  [`references/setup.md`](references/setup.md)) and paste it into the script,
+- Run `setup-admin.ps1` (creates the Exchange service principal, tags the
+  mailbox, scopes the RBAC role assignments, and installs the transport rule).
+
+### 4. Re-run to verify
+
+```bash
+./dist/emissary init
+```
+
+Once the admin is done, re-running `init` resumes from where it left off and
+**verifies each admin-dependent step live** — token acquisition, a real mailbox
+read, the negative test (must come back `403`), and allowlist resolution — never
+assuming success. It finishes with a one-screen security posture summary.
+
+You can also jump straight to the self-test at any time:
+
+```bash
+./dist/emissary doctor
+```
+
+Non-interactive setup (e.g. CI/config-management) is supported via
+`emissary init --config file.json`, using the same verification gates —
+see the `Config` fields in [`src/types.ts`](src/types.ts) for the required shape.
+
+### 5. Use it
+
+```bash
+./dist/emissary inbox
+./dist/emissary send --to approved@contoso.com --subject "hi" --body "..."
+```
+
+To give an **agent** this mailbox identity, point it at [`SKILL.md`](SKILL.md) —
+it documents the commands, the allowlist behavior, and the untrusted-content
+rules the agent must follow when reading email.
+
+Config lives at `$XDG_CONFIG_HOME/emissary/config.json` (default
+`~/.config/emissary/`); onboarding state at `$XDG_STATE_HOME/emissary/`
+(default `~/.local/state/emissary/`). See
+[`references/setup.md`](references/setup.md) for the full manual walkthrough
+if you'd rather not use the wizard, or need to understand exactly what it
+automates.
+
 ## The security model: two independent planes
 
 Emissary keeps **who the agent can reach** and **who the agent can email**
@@ -44,24 +152,6 @@ email outsiders (the transport rule blocks it).
 - **Every Graph body** is `JSON.stringify` of a typed object; **every URL segment**
   is percent-encoded. No string-built requests anywhere.
 - **Delivery ≠ submission**: a `202` means *submitted*. NDRs land in the inbox.
-
-## Install & use
-
-```bash
-bun install
-bun run src/index.ts doctor        # dev
-bun run build                      # -> dist/emissary (single binary)
-
-emissary init                      # onboarding wizard (operator)
-emissary doctor                    # verify the whole posture
-emissary inbox
-emissary send --to approved@contoso.com --subject "hi" --body "..."
-```
-
-Config lives at `$XDG_CONFIG_HOME/emissary/config.json` (default `~/.config/emissary/`);
-onboarding state at `$XDG_STATE_HOME/emissary/`. See
-[`references/setup.md`](references/setup.md) for the full end-to-end walkthrough,
-including the Enterprise-Application-Object-ID pitfall.
 
 ## Development
 
