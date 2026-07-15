@@ -1,0 +1,30 @@
+{
+  "name": "emissary",
+  "version": "0.1.0",
+  "description": "Governed Microsoft 365 shared-mailbox identity for AI agents (app-only, certificate auth, Exchange RBAC + preflight allowlist).",
+  "type": "module",
+  "bin": {
+    "emissary": "./dist/emissary"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build --compile --minify --outfile dist/emissary src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@azure/msal-node": "^5.4.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.4",
+    "@types/bun": "latest",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "private": true
+}

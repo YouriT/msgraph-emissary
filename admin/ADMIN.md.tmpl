@@ -1,0 +1,54 @@
+# Emissary — admin handoff for `{{MAILBOX}}`
+
+An operator has set up **Emissary**, a governed Microsoft 365 mailbox identity for
+an automated agent. They need an Exchange Online + Entra administrator to complete
+the steps below. Everything is scoped to a **single shared mailbox** — this app
+cannot reach any other mailbox once the RBAC scope is in place.
+
+## Values
+
+| Field | Value |
+|-------|-------|
+| Tenant | `{{TENANT_ID}}` |
+| App (client) ID | `{{CLIENT_ID}}` |
+| Shared mailbox | `{{MAILBOX}}` |
+| App display name | `{{APP_DISPLAY_NAME}}` |
+| Allowlist group | `{{ALLOWLIST_GROUP}}` |
+| Management scope | `{{SCOPE_NAME}}` |
+| Mailbox tag | `{{CUSTOM_ATTR}} = {{CUSTOM_ATTR_VALUE}}` |
+| Transport rule | `{{TRANSPORT_RULE_NAME}}` |
+| Cert thumbprint (SHA-256) | `{{THUMBPRINT}}` |
+
+## What the operator has already done
+
+- Created the certificate locally (private key never leaves their machine, `chmod 600`).
+- Registered (or will register) the single-tenant Entra app and uploaded the **public**
+  certificate to it.
+
+## What you need to do
+
+1. **Confirm the app registration** `{{CLIENT_ID}}` exists (single-tenant) and that the
+   operator's public certificate is uploaded under *Certificates & secrets → Certificates*.
+   The thumbprint should match `{{THUMBPRINT}}`. **No client secrets** — remove any that exist.
+
+2. **Grant + consent to these Graph *application* permissions** (Entra → the app →
+   API permissions → Grant admin consent):
+   - `Mail.ReadWrite`, `Mail.Send` — mailbox access (narrowed to one mailbox by step 4 below).
+   - `GroupMember.Read.All`, `Group.Read.All` — read the allowlist group's membership.
+   - `User.ReadBasic.All` — resolve member users' addresses.
+   - `OrgContact.Read.All` — resolve mail-contact members.
+
+3. **Find the Enterprise Application Object ID.** Entra → *Enterprise applications* →
+   `{{APP_DISPLAY_NAME}}` → Overview → **Object ID**. This is **not** the app
+   registration's Object ID and **not** the Client ID. Paste it into `setup-admin.ps1`
+   as `$EnterpriseAppObjectId`. (This is the single most common setup mistake — see
+   `references/setup.md`.)
+
+4. **Run `setup-admin.ps1`** (rendered alongside this file). It creates the Exchange
+   service principal, tags the mailbox, builds the management scope, assigns the two
+   scoped mail roles, ensures the allowlist group, and installs the transport rule.
+   It is idempotent — safe to re-run.
+
+5. **Tell the operator to run `emissary doctor`.** It verifies token acquisition,
+   mailbox read, the negative test (proving the app is *blocked* from other mailboxes),
+   and allowlist resolution.

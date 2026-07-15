@@ -1,0 +1,126 @@
+<#
+  ============================================================================
+  Emissary — Exchange Online / Entra admin setup
+  ============================================================================
+  Run by an Exchange Online + Entra administrator. `emissary init` renders this
+  file with the operator's real values filled in, so you can run it (or read it)
+  directly instead of transcribing steps.
+
+  What this does (and does NOT do):
+    - Scopes the Entra app to exactly ONE shared mailbox using Exchange RBAC for
+      Applications (service principal + management scope on a custom attribute +
+      role assignments). This is the modern replacement for the deprecated
+      Application Access Policies — do not use those.
+    - Adds a transport rule as a hard, admin-side outbound boundary.
+    - Ensures the outbound allowlist group exists.
+
+  It does NOT create the app registration or upload the certificate — the
+  operator does that in Entra (see ADMIN.md). It does NOT grant Graph API
+  application permissions — an admin must consent to those in Entra:
+      Mail.ReadWrite, Mail.Send  (mailbox access — but Exchange RBAC below
+                                  narrows these to the one mailbox),
+      GroupMember.Read.All, Group.Read.All, User.ReadBasic.All,
+      OrgContact.Read.All        (allowlist resolution).
+
+  Every step is guarded so re-running is safe (idempotent).
+  ============================================================================
+#>
+
+$ErrorActionPreference = 'Stop'
+
+# --- Rendered values (from `emissary init`) --------------------------------
+$TenantId              = '{{TENANT_ID}}'
+$ClientId             = '{{CLIENT_ID}}'          # Entra app "Application (client) ID"
+$EnterpriseAppObjectId = '{{ENTERPRISE_APP_OBJECT_ID}}'  # <-- FILL ME IN: the
+#   Enterprise Application (service principal) *Object ID*, NOT the app
+#   registration's Object ID and NOT the Client ID. Find it in Entra under
+#   "Enterprise applications" > (your app) > Overview > Object ID.
+$Mailbox              = '{{MAILBOX}}'
+$AppDisplayName       = '{{APP_DISPLAY_NAME}}'
+$ScopeName            = '{{SCOPE_NAME}}'
+$CustomAttr           = '{{CUSTOM_ATTR}}'         # e.g. CustomAttribute15
+$CustomAttrValue      = '{{CUSTOM_ATTR_VALUE}}'   # e.g. emissary-managed
+$AllowlistGroup       = '{{ALLOWLIST_GROUP}}'
+$TransportRuleName    = '{{TRANSPORT_RULE_NAME}}'
+$CertThumbprint       = '{{THUMBPRINT}}'          # for your records / audit
+
+Write-Host "== Emissary admin setup for $Mailbox ==" -ForegroundColor Cyan
+
+# --- 0. Connect -------------------------------------------------------------
+# Requires the ExchangeOnlineManagement module: Install-Module ExchangeOnlineManagement
+if (-not (Get-ConnectionInformation -ErrorAction SilentlyContinue)) {
+  Connect-ExchangeOnline -Organization $TenantId
+}
+
+# --- 1. Service principal (maps the Entra app into Exchange) ----------------
+$sp = Get-ServicePrincipal -Identity $ClientId -ErrorAction SilentlyContinue
+if (-not $sp) {
+  Write-Host "Creating service principal for app $ClientId ..."
+  New-ServicePrincipal -AppId $ClientId -ObjectId $EnterpriseAppObjectId -DisplayName $AppDisplayName
+} else {
+  Write-Host "Service principal already exists: $($sp.DisplayName)"
+}
+
+# --- 2. Tag the mailbox with the custom attribute ---------------------------
+# The management scope below matches on this attribute, so ONLY mailboxes
+# carrying this value are reachable by the app.
+$mbx = Get-Mailbox -Identity $Mailbox
+if ($mbx.$CustomAttr -ne $CustomAttrValue) {
+  Write-Host "Setting $CustomAttr=$CustomAttrValue on $Mailbox ..."
+  Set-Mailbox -Identity $Mailbox -$CustomAttr $CustomAttrValue
+} else {
+  Write-Host "$Mailbox already tagged ($CustomAttr=$CustomAttrValue)"
+}
+
+# --- 3. Management scope (the narrowing boundary) ---------------------------
+$scope = Get-ManagementScope -Identity $ScopeName -ErrorAction SilentlyContinue
+if (-not $scope) {
+  Write-Host "Creating management scope $ScopeName ..."
+  New-ManagementScope -Name $ScopeName -RecipientRestrictionFilter "$CustomAttr -eq '$CustomAttrValue'"
+} else {
+  Write-Host "Management scope already exists: $ScopeName"
+}
+
+# --- 4. Role assignments (Mail.ReadWrite + Mail.Send, scoped) ---------------
+# These are the Exchange RBAC application roles, constrained to $ScopeName, so
+# the app's Graph Mail.* permissions only apply to the tagged mailbox.
+foreach ($role in @('Application Mail.ReadWrite', 'Application Mail.Send')) {
+  $asgName = "$AppDisplayName-$($role -replace '[^A-Za-z0-9]', '')"
+  $existing = Get-ManagementRoleAssignment -Identity $asgName -ErrorAction SilentlyContinue
+  if (-not $existing) {
+    Write-Host "Assigning role '$role' scoped to $ScopeName ..."
+    New-ManagementRoleAssignment -Name $asgName -App $ClientId -Role $role -CustomResourceScope $ScopeName
+  } else {
+    Write-Host "Role assignment already exists: $asgName"
+  }
+}
+
+# --- 5. Allowlist group (outbound preflight source of truth) ----------------
+$grp = Get-DistributionGroup -Identity $AllowlistGroup -ErrorAction SilentlyContinue
+if (-not $grp) {
+  Write-Host "Creating mail-enabled security group $AllowlistGroup ..."
+  New-DistributionGroup -Name $AllowlistGroup -PrimarySmtpAddress $AllowlistGroup -Type Security
+  Write-Host "  -> Add approved recipients with: Add-DistributionGroupMember -Identity $AllowlistGroup -Member user@contoso.com"
+} else {
+  Write-Host "Allowlist group already exists: $AllowlistGroup"
+}
+
+# --- 6. Transport rule (hard outbound enforcement) --------------------------
+# Belt-and-suspenders with the client-side preflight: mail FROM the agent
+# mailbox to anyone NOT in the allowlist group is rejected at the transport
+# layer, regardless of what the client does.
+$rule = Get-TransportRule -Identity $TransportRuleName -ErrorAction SilentlyContinue
+if (-not $rule) {
+  Write-Host "Creating transport rule $TransportRuleName ..."
+  New-TransportRule -Name $TransportRuleName `
+    -From $Mailbox `
+    -ExceptIfSentToMemberOf $AllowlistGroup `
+    -RejectMessageReasonText 'Emissary is permitted to email approved recipients only.'
+} else {
+  Write-Host "Transport rule already exists: $TransportRuleName"
+}
+
+Write-Host ""
+Write-Host "== Done. Ask the operator to run: emissary doctor ==" -ForegroundColor Green
+Write-Host "   It verifies token acquisition, mailbox read, the negative test," -ForegroundColor Green
+Write-Host "   and allowlist resolution against this configuration." -ForegroundColor Green

@@ -1,0 +1,18 @@
+# Build output
+dist/
+node_modules/
+
+# Local runtime state / secrets — NEVER commit
+# (Emissary keeps these under XDG dirs by default, but guard against local copies too.)
+config/
+state/
+*.pem
+*.key
+*.crt
+*.cer
+*.pfx
+onboarding.json
+
+# Editor / OS
+.DS_Store
+*.log
