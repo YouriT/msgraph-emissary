@@ -145,6 +145,20 @@ export interface ListOptions {
   from?: string;
   hasAttachments?: boolean;
   importance?: ImportanceLevel;
+  /**
+   * Resume a previous listing: the exact `nextLink` a prior call returned.
+   * When set, every other option here is ignored for the Graph request
+   * itself (nextLink already encodes folder/filter/search/$top) — EXCEPT
+   * `categories`, which is applied client-side and must be re-supplied on
+   * each page to keep matching consistently in $search mode.
+   */
+  next?: string;
+}
+
+export interface ListResult {
+  messages: GraphMessage[];
+  /** Pass this back as `next` to fetch the following page; undefined means no more results. */
+  nextLink?: string;
 }
 
 /** Escape a value for a single-quoted OData string literal (doubles embedded quotes). */
@@ -172,8 +186,24 @@ export function kqlImportance(level: ImportanceLevel): "low" | "medium" | "high"
   return level === "normal" ? "medium" : level;
 }
 
+/** Apply the client-side category post-filter (used for $search mode, where categories aren't KQL-searchable). */
+function filterByCategories(messages: GraphMessage[], categories: string[] | undefined): GraphMessage[] {
+  if (!categories?.length) return messages;
+  const wanted = new Set(categories);
+  return messages.filter((m) => (m.categories ?? []).some((c) => wanted.has(c)));
+}
+
+/** exactOptionalPropertyTypes forbids `nextLink: undefined` — omit the key entirely instead. */
+function toListResult(messages: GraphMessage[], nextLink: string | undefined): ListResult {
+  return nextLink ? { messages, nextLink } : { messages };
+}
+
 /**
- * List messages from a folder (or the whole mailbox).
+ * List messages from a folder (or the whole mailbox). Returns one page at a
+ * time (capped at `top`) plus a `nextLink`, if more results are available —
+ * pass that back as `opts.next` on a later call to fetch the next page.
+ * There's no automatic multi-page fetching here: pagination is the caller's
+ * (the agent's) call to make, one explicit page at a time.
  *
  * Uses $search (KQL) when a free-text query is given; Graph does not allow
  * $search to combine with $filter or $orderby for messages at all, so any
@@ -184,8 +214,18 @@ export function kqlImportance(level: ImportanceLevel): "low" | "medium" | "high"
  * Otherwise builds a single ANDed $filter (unreadOnly, from, hasAttachments,
  * importance, categories) plus $orderby by receivedDateTime.
  */
-export async function listMessages(graph: Graph, cfg: Config, opts: ListOptions): Promise<GraphMessage[]> {
+export async function listMessages(graph: Graph, cfg: Config, opts: ListOptions): Promise<ListResult> {
   const top = Math.min(Math.max(opts.top ?? 20, 1), 100);
+
+  if (opts.next) {
+    // nextLink is a fully-formed URL from our own prior response — it already
+    // encodes folder/$filter/$search/$top, so nothing else here is rebuilt.
+    // Categories are client-side only, so they must be re-applied per page.
+    const headers = opts.search !== undefined ? { ConsistencyLevel: "eventual" } : undefined;
+    const page = await graph.followLink<GraphMessage>(opts.next, headers);
+    return toListResult(filterByCategories(page.value, opts.categories), page["@odata.nextLink"]);
+  }
+
   const base = opts.folder
     ? usersPath(cfg.mailbox, "mailFolders", await resolveFolderId(graph, cfg, opts.folder), "messages")
     : usersPath(cfg.mailbox, "messages");
@@ -200,9 +240,7 @@ export async function listMessages(graph: Graph, cfg: Config, opts: ListOptions)
       { $search: clauses.join(" AND "), $select: SUMMARY_SELECT, $top: top },
       { ConsistencyLevel: "eventual" },
     );
-    if (!opts.categories?.length) return res.value;
-    const wanted = new Set(opts.categories);
-    return res.value.filter((m) => (m.categories ?? []).some((c) => wanted.has(c)));
+    return toListResult(filterByCategories(res.value, opts.categories), res["@odata.nextLink"]);
   }
 
   const filters: string[] = [];
@@ -219,7 +257,7 @@ export async function listMessages(graph: Graph, cfg: Config, opts: ListOptions)
   };
   if (filters.length > 0) query.$filter = filters.join(" and ");
   const res = await graph.get<GraphCollection<GraphMessage>>(base, query);
-  return res.value;
+  return toListResult(res.value, res["@odata.nextLink"]);
 }
 
 /** Fetch a single message by exact id (already resolved). */

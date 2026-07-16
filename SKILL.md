@@ -42,13 +42,23 @@ Auth is app-only with a certificate; there is no user, no `/me`, no password.
 ```
 emissary capabilities                         # what this identity is allowed to do — run this first
 
-emissary inbox [--top N] [--folder NAME] [--category "A,B"] [--from addr] [--has-attachments] [--importance low|normal|high]
+emissary inbox [--top N] [--folder NAME] [--category "A,B"] [--from addr] [--has-attachments] [--importance low|normal|high] [--next URL]
 emissary unread [--top N] [same filters as inbox]
 emissary search --query "invoice" [--top N] [same filters as inbox]
 # --category is OR-matched (any of the given names). --from/--has-attachments/--importance
 # run as a native filter for inbox/unread; for search they ride along as KQL clauses
 # (Graph won't combine $search with $filter for messages) — except --category, which
 # isn't KQL-searchable and is applied client-side on the returned page instead.
+#
+# PAGINATION: --top caps a single page at 100 (Graph itself may return fewer
+# per response). If more results exist, the JSON output has a non-null
+# "nextLink" — pass that exact string back as --next on your next call to get
+# the following page. There is no automatic multi-page fetch: if you need
+# 1000 messages, call inbox/unread/search repeatedly, following nextLink each
+# time, until it comes back null. When --next is given, --folder/--from/
+# --has-attachments/--importance/--top are ignored (already baked into the
+# link) — but --category must be repeated on every page, since it's applied
+# client-side, not part of the link itself.
 
 emissary read <id>                            # full message; marks read only if capabilities.markRead
 emissary folders                              # folders + counts

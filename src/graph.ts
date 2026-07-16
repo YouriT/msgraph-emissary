@@ -149,14 +149,23 @@ export class Graph {
    * absolute Graph URL; we fetch it directly (still with our auth header), but
    * only after confirming it still points at Graph — the bearer token must
    * never be sent to a non-Graph host, even from a server-supplied link.
+   * `headers` (e.g. `ConsistencyLevel: eventual` for $search) is re-sent on
+   * every page, since nextLink only carries query state, not headers.
    */
-  async paged<T>(path: string, query?: RequestOptions["query"], limit = 100): Promise<T[]> {
+  async paged<T>(
+    path: string,
+    query?: RequestOptions["query"],
+    limit = 100,
+    headers?: Record<string, string>,
+  ): Promise<T[]> {
     const out: T[] = [];
     let url: string | undefined = buildUrl(path, query);
     while (url && out.length < limit) {
       assertGraphHost(url);
       const res: Response = await fetch(url, {
-        headers: { Authorization: `Bearer ${this.token}`, Accept: "application/json" },
+        // Caller headers first so Authorization/Accept below always win — same
+        // rule as raw(): a caller can add headers but never override auth.
+        headers: { ...headers, Authorization: `Bearer ${this.token}`, Accept: "application/json" },
       });
       if (!res.ok) throw await toHttpError(res);
       const page = (await res.json()) as GraphCollection<T>;
@@ -164,6 +173,23 @@ export class Graph {
       url = page["@odata.nextLink"];
     }
     return out.slice(0, limit);
+  }
+
+  /**
+   * Fetch exactly one page from a server-supplied @odata.nextLink (or any
+   * absolute Graph URL) — same host guard as paged(), but returns the full
+   * collection (value + the next @odata.nextLink, if any) instead of
+   * auto-following. This is how real pagination is exposed to the CLI: a
+   * command returns nextLink in its JSON output, and the caller resumes by
+   * passing that same URL back via followLink() on a later invocation.
+   */
+  async followLink<T>(url: string, headers?: Record<string, string>): Promise<GraphCollection<T>> {
+    assertGraphHost(url);
+    const res = await fetch(url, {
+      headers: { ...headers, Authorization: `Bearer ${this.token}`, Accept: "application/json" },
+    });
+    if (!res.ok) throw await toHttpError(res);
+    return (await res.json()) as GraphCollection<T>;
   }
 }
 

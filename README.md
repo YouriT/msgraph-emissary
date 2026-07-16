@@ -192,6 +192,20 @@ they ride along as KQL clauses instead (Graph won't combine `$search` with
 `$filter` at all for messages), except `--category`, which isn't a
 KQL-searchable property and is applied client-side on the returned page.
 
+**Pagination:** `--top` caps a single page at 100. If more results are
+available, the output includes a `nextLink` — pass that back as `--next` on
+a later call to fetch the next page:
+
+```bash
+./emissary inbox --top 100                              # -> nextLink: "https://graph.microsoft.com/..."
+./emissary inbox --next "https://graph.microsoft.com/..." # next 100
+```
+
+There's no automatic multi-page fetching by design — each page is one
+explicit call, so an agent pulling a large result set does so deliberately,
+page by page, rather than silently pulling an unbounded amount of mail in
+one command.
+
 To give an **agent** this mailbox identity, point it at [`SKILL.md`](SKILL.md) —
 it documents the commands, the allowlist behavior, and the untrusted-content
 rules the agent must follow when reading email.

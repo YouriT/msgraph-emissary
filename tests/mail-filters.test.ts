@@ -84,8 +84,76 @@ test("listMessages ($search mode) applies --category client-side, since KQL can'
     },
   ]);
   const graph = Graph.withToken("t", { ...TEST_CONFIG });
-  const results = await listMessages(graph, TEST_CONFIG, { search: "invoice", categories: ["Red"] });
-  expect(results.map((m) => m.id)).toEqual(["m1"]);
+  const result = await listMessages(graph, TEST_CONFIG, { search: "invoice", categories: ["Red"] });
+  expect(result.messages.map((m) => m.id)).toEqual(["m1"]);
   // The server never saw a $filter — Graph would reject $search + $filter together.
   expect(handle.requests[0]!.url).not.toContain("$filter");
+});
+
+// --------------------------------------------------------------------------
+// Pagination: --top caps a single page, but a real "1000 messages" request
+// (the bug an agent actually hit) must be satisfiable by following nextLink
+// across explicit, agent-driven calls — not silently truncated with no way
+// to get the rest.
+// --------------------------------------------------------------------------
+
+const NEXT_LINK = "https://graph.microsoft.com/v1.0/users/agent%40contoso.com/messages?$skip=100";
+
+test("listMessages ($filter mode) returns nextLink when Graph says there's more", async () => {
+  handle = installMockFetch([
+    {
+      method: "GET",
+      match: (u) => !u.includes("$skip"),
+      json: { value: [{ id: "m1" }], "@odata.nextLink": NEXT_LINK },
+    },
+  ]);
+  const graph = Graph.withToken("t", { ...TEST_CONFIG });
+  const result = await listMessages(graph, TEST_CONFIG, { top: 1 });
+  expect(result.nextLink).toBe(NEXT_LINK);
+});
+
+test("listMessages omits nextLink entirely when Graph has no more pages (not nextLink: undefined)", async () => {
+  handle = installMockFetch([{ method: "GET", match: () => true, json: { value: [{ id: "m1" }] } }]);
+  const graph = Graph.withToken("t", { ...TEST_CONFIG });
+  const result = await listMessages(graph, TEST_CONFIG, {});
+  expect("nextLink" in result).toBe(false);
+});
+
+test("listMessages({ next }) fetches the supplied nextLink directly, ignoring other options", async () => {
+  handle = installMockFetch([
+    {
+      method: "GET",
+      match: (u) => u === NEXT_LINK,
+      json: { value: [{ id: "m2" }] },
+    },
+  ]);
+  const graph = Graph.withToken("t", { ...TEST_CONFIG });
+  const result = await listMessages(graph, TEST_CONFIG, {
+    next: NEXT_LINK,
+    // These would build a completely different request if `next` weren't honored first.
+    folder: "archive",
+    unreadOnly: true,
+    top: 5,
+  });
+  expect(result.messages.map((m) => m.id)).toEqual(["m2"]);
+  expect(handle.requests.length).toBe(1);
+  expect(handle.requests[0]!.url).toBe(NEXT_LINK);
+});
+
+test("listMessages({ next, categories }) still re-applies the client-side category filter per page", async () => {
+  handle = installMockFetch([
+    {
+      method: "GET",
+      match: (u) => u === NEXT_LINK,
+      json: {
+        value: [
+          { id: "m2", categories: ["Blue"] },
+          { id: "m3", categories: ["Red"] },
+        ],
+      },
+    },
+  ]);
+  const graph = Graph.withToken("t", { ...TEST_CONFIG });
+  const result = await listMessages(graph, TEST_CONFIG, { next: NEXT_LINK, categories: ["Red"] });
+  expect(result.messages.map((m) => m.id)).toEqual(["m3"]);
 });

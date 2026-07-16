@@ -1,6 +1,12 @@
 /**
  * `emissary inbox [--top N] [--folder NAME] [--category "A,B"] [--from addr]
- *   [--has-attachments] [--importance low|normal|high]` — list recent messages.
+ *   [--has-attachments] [--importance low|normal|high] [--next URL]` — list
+ *   recent messages.
+ *
+ * Each page is capped at --top (max 100). If more results are available, the
+ * output includes `nextLink` — pass that back as `--next` on a later call to
+ * fetch the next page. There's no automatic multi-page fetching; paging is
+ * the caller's call to make, one page at a time.
  */
 
 import { numFlag, parseArgs, strFlag } from "../args.ts";
@@ -10,7 +16,7 @@ import { listMessages, parseListFilterFlags, projectSummary, VALID_IMPORTANCE_LE
 import { errorResult, numbered, printJson } from "../output.ts";
 
 export async function inboxCommand(args: string[]): Promise<number> {
-  const p = parseArgs(args, ["top", "folder", "from", "category", "importance"]);
+  const p = parseArgs(args, ["top", "folder", "from", "category", "importance", "next"]);
   const parsed = parseListFilterFlags(p);
   if ("invalidImportance" in parsed) {
     printJson(
@@ -23,11 +29,18 @@ export async function inboxCommand(args: string[]): Promise<number> {
   }
   const cfg = await loadConfig();
   const graph = await Graph.create(cfg);
-  const msgs = await listMessages(graph, cfg, {
+  const next = strFlag(p, "next");
+  const result = await listMessages(graph, cfg, {
     folder: strFlag(p, "folder") ?? "inbox",
     top: numFlag(p, "top", 20),
     ...parsed.flags,
+    ...(next ? { next } : {}),
   });
-  printJson({ ok: true, count: msgs.length, messages: numbered(msgs.map(projectSummary)) });
+  printJson({
+    ok: true,
+    count: result.messages.length,
+    messages: numbered(result.messages.map(projectSummary)),
+    nextLink: result.nextLink ?? null,
+  });
   return 0;
 }

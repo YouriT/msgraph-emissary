@@ -47,10 +47,11 @@ Setup:
   init                     Resumable onboarding wizard (cert, admin pack, verification)
   doctor                   Self-test: token, mailbox read, negative test, allowlist
 
-Read (all four list filters below work on inbox/unread/search):
-  inbox [--top N] [--folder NAME] [--category "A,B"] [--from addr] [--has-attachments] [--importance low|normal|high]
-  unread [--top N] [--folder NAME] [--category ...] [--from ...] [--has-attachments] [--importance ...]
-  search --query "..." [--top N] [--folder NAME] [--category ...] [--from ...] [--has-attachments] [--importance ...]
+Read (all filters + pagination below work on inbox/unread/search; --top caps
+a single page at 100 — pass the returned nextLink back as --next for more):
+  inbox [--top N] [--folder NAME] [--category "A,B"] [--from addr] [--has-attachments] [--importance low|normal|high] [--next URL]
+  unread [--top N] [--folder NAME] [--category ...] [--from ...] [--has-attachments] [--importance ...] [--next URL]
+  search --query "..." [--top N] [--folder NAME] [--category ...] [--from ...] [--has-attachments] [--importance ...] [--next URL]
   read <id>
   folders
   stats
