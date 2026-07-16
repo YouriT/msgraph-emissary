@@ -1,9 +1,9 @@
 /**
  * Config capability invariants: read is always on and free; every other
- * capability (markRead, download, move, send, reply, forward) is an
- * independent, deny-by-default toggle. The allowlist is required if and only
- * if send, reply, OR forward is enabled — a read-only identity must never be
- * forced to configure one.
+ * capability (markRead, download, move, copy, delete, categorize, flag,
+ * importance, focus, send, reply, forward) is an independent, deny-by-default
+ * toggle. The allowlist is required if and only if send, reply, OR forward is
+ * enabled — a read-only identity must never be forced to configure one.
  */
 
 import { expect, test } from "bun:test";
@@ -15,7 +15,20 @@ const BASE = {
   mailbox: "agent@contoso.com",
 };
 
-const ALL_OFF = { markRead: false, download: false, move: false, send: false, reply: false, forward: false };
+const ALL_OFF = {
+  markRead: false,
+  download: false,
+  move: false,
+  copy: false,
+  delete: false,
+  categorize: false,
+  flag: false,
+  importance: false,
+  focus: false,
+  send: false,
+  reply: false,
+  forward: false,
+};
 
 test("validateConfig defaults every capability to false when capabilities is omitted", () => {
   const cfg = validateConfig({ ...BASE });
@@ -48,6 +61,23 @@ test("validateConfig accepts send:true with an allowlistGroup", () => {
 test("validateConfig does not require allowlistGroup for move, markRead, or download alone", () => {
   const cfg = validateConfig({ ...BASE, capabilities: { move: true, markRead: true, download: true } });
   expect(cfg.capabilities).toEqual({ ...ALL_OFF, move: true, markRead: true, download: true });
+  expect(cfg.allowlistGroup).toBeUndefined();
+});
+
+test("validateConfig does not require allowlistGroup for copy, delete, categorize, flag, importance, or focus", () => {
+  const cfg = validateConfig({
+    ...BASE,
+    capabilities: { copy: true, delete: true, categorize: true, flag: true, importance: true, focus: true },
+  });
+  expect(cfg.capabilities).toEqual({
+    ...ALL_OFF,
+    copy: true,
+    delete: true,
+    categorize: true,
+    flag: true,
+    importance: true,
+    focus: true,
+  });
   expect(cfg.allowlistGroup).toBeUndefined();
 });
 

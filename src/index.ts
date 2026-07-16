@@ -29,6 +29,13 @@ const COMMANDS: Record<string, () => Promise<Handler>> = {
   download: async () => (await import("./commands/download.ts")).downloadCommand,
   folders: async () => (await import("./commands/folders.ts")).foldersCommand,
   move: async () => (await import("./commands/move.ts")).moveCommand,
+  copy: async () => (await import("./commands/copy.ts")).copyCommand,
+  delete: async () => (await import("./commands/delete.ts")).deleteCommand,
+  mark: async () => (await import("./commands/mark.ts")).markCommand,
+  categorize: async () => (await import("./commands/categorize.ts")).categorizeCommand,
+  flag: async () => (await import("./commands/flag.ts")).flagCommand,
+  importance: async () => (await import("./commands/importance.ts")).importanceCommand,
+  focus: async () => (await import("./commands/focus.ts")).focusCommand,
   stats: async () => (await import("./commands/stats.ts")).statsCommand,
   allowlist: async () => (await import("./commands/allowlist.ts")).allowlistCommand,
 };
@@ -49,6 +56,13 @@ Read:
   attachments <id>
   download <id> <name> [--out DIR]
   move <id> --to FOLDER
+  copy <id> --to FOLDER
+  delete <id>
+  mark <id> --read|--unread
+  categorize <id> [--add "Cat1,Cat2"] [--remove "Cat3"]
+  flag <id> --status flagged|complete|notFlagged
+  importance <id> --level low|normal|high
+  focus <id> --as focused|other
 
 Send (always runs the allowlist preflight; no override flag exists):
   send --to a@x --subject "..." --body "..." [--cc b@x]

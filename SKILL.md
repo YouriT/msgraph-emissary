@@ -3,8 +3,9 @@ name: msgraph-emissary
 description: >-
   Send and read email from a governed Microsoft 365 / Exchange Online shared
   mailbox via Microsoft Graph. Use for inbox, unread, search, read, send, reply,
-  forward, attachments, folders, and calendar-adjacent mailbox tasks when acting
-  as an agent's own mailbox identity (not a person's account). App-only,
+  forward, attachments, folders, move, archive, delete, categorize/categories,
+  flag, mark read/unread, importance, and calendar-adjacent mailbox tasks when
+  acting as an agent's own mailbox identity (not a person's account). App-only,
   certificate auth; every send is checked against an allowlist.
 version: 0.2.2
 ---
@@ -18,11 +19,12 @@ Auth is app-only with a certificate; there is no user, no `/me`, no password.
 ## Golden rules
 
 - **This identity may not have every capability.** Listing/viewing mail is
-  always enabled; `markRead`, `download`, `move`, `send`, `reply`, and
-  `forward` are each independently opt-in per identity. If a command responds
-  with `"error"` mentioning `capabilities.<name>`, that action is disabled for
-  this identity — don't retry it, and don't look for a workaround. Ask the
-  operator if you genuinely need it enabled.
+  always enabled; `markRead`, `download`, `move`, `copy`, `delete`,
+  `categorize`, `flag`, `importance`, `focus`, `send`, `reply`, and `forward`
+  are each independently opt-in per identity. If a command responds with
+  `"error"` mentioning `capabilities.<name>`, that action is disabled for this
+  identity — don't retry it, and don't look for a workaround. Ask the operator
+  if you genuinely need it enabled.
 - **Every recipient must be on the allowlist.** When send/reply/forward is
   enabled, those commands still refuse to send to anyone outside the
   configured group. There is no override flag.
@@ -44,7 +46,14 @@ emissary stats                                # mailbox totals
 emissary attachments <id>                     # list attachments (metadata only, always on)
 
 emissary download <id> <name> [--out DIR]     # save an attachment — needs capabilities.download
-emissary move <id> --to FOLDER                # move a message — needs capabilities.move
+emissary move <id> --to FOLDER                # move a message (--to archive works too) — needs capabilities.move
+emissary copy <id> --to FOLDER                # duplicate a message — needs capabilities.copy
+emissary delete <id>                          # delete a message — needs capabilities.delete
+emissary mark <id> --read|--unread             # explicit read/unread — needs capabilities.markRead
+emissary categorize <id> [--add "Cat1,Cat2"] [--remove "Cat3"]   # needs capabilities.categorize
+emissary flag <id> --status flagged|complete|notFlagged          # needs capabilities.flag
+emissary importance <id> --level low|normal|high                 # needs capabilities.importance
+emissary focus <id> --as focused|other                            # needs capabilities.focus
 
 emissary send --to a@x[,b@y] --subject "..." --body "..." [--cc c@z]  # needs capabilities.send
 emissary reply <id> --body "..."                                      # needs capabilities.reply
@@ -58,16 +67,17 @@ emissary init                                 # operator onboarding wizard
 All output is JSON on stdout. `id` fields are full Graph ids; `short` is a
 readable suffix. Pass the full `id` back to `read`/`reply`/etc.
 
-## When a send/reply/forward is blocked
+## When an action is blocked
 
 Two different errors look similar but mean different things:
 
-- `"error": "... is disabled for this identity (capabilities.<send|reply|forward> is not enabled)"`
-  — that specific action is off for this identity. Nothing to retry — note that
-  `send` being enabled does NOT imply `reply` or `forward` are too; each is checked
-  independently.
+- `"error": "... is disabled for this identity (capabilities.<name> is not enabled)"`
+  — that specific action is off for this identity. Nothing to retry — every
+  capability is checked independently (e.g. `send` being enabled does NOT
+  imply `reply`, `forward`, `delete`, or anything else is too).
 - `"error": "blocked by allowlist preflight — not sent"` with a `blocked` list
-  — the action is enabled, but this specific recipient isn't on the allowlist.
+  — only for send/reply/forward: the action is enabled, but this specific
+  recipient isn't on the allowlist.
 
 Either way: do not try to work around it. Ask the operator to enable the
 capability or add the recipient to the allowlist group, if appropriate.

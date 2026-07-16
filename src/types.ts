@@ -31,12 +31,24 @@
  * rule + allowlist-resolution Graph permissions.
  */
 export interface Capabilities {
-  /** read.ts's `PATCH isRead:true` side effect. Needs Mail.ReadWrite. */
+  /** read.ts's `PATCH isRead:true` side effect, and mark.ts (explicit read/unread). Needs Mail.ReadWrite. */
   markRead: boolean;
   /** download.ts writing attachment bytes to disk. Needs only Mail.Read. */
   download: boolean;
   /** move.ts. Needs Mail.ReadWrite. */
   move: boolean;
+  /** copy.ts (duplicate into another folder). Needs Mail.ReadWrite. */
+  copy: boolean;
+  /** delete.ts. Needs Mail.ReadWrite. */
+  delete: boolean;
+  /** categorize.ts (add/remove Outlook categories). Needs Mail.ReadWrite. */
+  categorize: boolean;
+  /** flag.ts (follow-up flag: flagged/complete/notFlagged). Needs Mail.ReadWrite. */
+  flag: boolean;
+  /** importance.ts (low/normal/high). Needs Mail.ReadWrite. */
+  importance: boolean;
+  /** focus.ts (Focused Inbox classification override: focused/other). Needs Mail.ReadWrite. */
+  focus: boolean;
   /** send.ts (compose new mail). Needs Mail.Send + allowlist. */
   send: boolean;
   /** reply.ts. Needs Mail.Send + allowlist. */
@@ -52,7 +64,16 @@ export function needsSend(caps: Capabilities): boolean {
 
 /** True if any capability needs write access to the mailbox (beyond reading attachment bytes). */
 export function needsReadWrite(caps: Capabilities): boolean {
-  return caps.move || caps.markRead;
+  return (
+    caps.move ||
+    caps.markRead ||
+    caps.copy ||
+    caps.delete ||
+    caps.categorize ||
+    caps.flag ||
+    caps.importance ||
+    caps.focus
+  );
 }
 
 /** Persistent, operator-owned configuration. Lives at $XDG_CONFIG_HOME/emissary/config.json. */
@@ -121,6 +142,11 @@ export interface GraphItemBody {
   content: string;
 }
 
+/** followupFlag resource — Outlook's "flag for follow up" on a message. */
+export interface GraphFollowupFlag {
+  flagStatus?: "notFlagged" | "complete" | "flagged";
+}
+
 export interface GraphMessage {
   id: string;
   subject?: string;
@@ -138,6 +164,10 @@ export interface GraphMessage {
   webLink?: string;
   conversationId?: string;
   parentFolderId?: string;
+  categories?: string[];
+  flag?: GraphFollowupFlag;
+  importance?: "low" | "normal" | "high";
+  inferenceClassification?: "focused" | "other";
 }
 
 export interface GraphMailFolder {

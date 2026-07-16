@@ -43,19 +43,30 @@ permissions — some share a role for reasons that aren't obvious upfront:
 | Capability | Unlocks | Exchange RBAC role needed | Extra admin work |
 |---|---|---|---|
 | *(always on)* | `inbox`, `unread`, `search`, `read`, `folders`, `stats`, `attachments` | `Application Mail.Read` | none |
-| `markRead` | marking a message read when `read` views it | upgrades to `Application Mail.ReadWrite` (it's a write) | none |
+| `markRead` | `read`'s mark-as-read side effect, plus `mark` (explicit read/unread) | upgrades to `Application Mail.ReadWrite` (it's a write) | none |
 | `download` | `download` (saving attachment bytes to disk) | stays on `Application Mail.Read` — reading bytes isn't a write | none |
-| `move` | `move` (between folders) | upgrades to `Application Mail.ReadWrite` | none |
+| `move` | `move` (between folders, incl. `archive`) | upgrades to `Application Mail.ReadWrite` | none |
+| `copy` | `copy` (duplicate into another folder) | upgrades to `Application Mail.ReadWrite` | none |
+| `delete` | `delete` | upgrades to `Application Mail.ReadWrite` | none |
+| `categorize` | `categorize` (add/remove Outlook categories) | upgrades to `Application Mail.ReadWrite` | none |
+| `flag` | `flag` (follow-up: flagged/complete/notFlagged) | upgrades to `Application Mail.ReadWrite` | none |
+| `importance` | `importance` (low/normal/high) | upgrades to `Application Mail.ReadWrite` | none |
+| `focus` | `focus` (Focused/Other reclassification) | upgrades to `Application Mail.ReadWrite` | none |
 | `send` | `send` (compose new mail) | adds `Application Mail.Send` | allowlist group + transport rule |
 | `reply` | `reply` | adds `Application Mail.Send` | allowlist group + transport rule |
 | `forward` | `forward` | adds `Application Mail.Send` | allowlist group + transport rule |
 
-Two things worth calling out: `markRead` and `move` are separate toggles an
-operator may want independently, but both require the same `Mail.ReadWrite`
-role, since marking read is itself a mailbox write. And `send`/`reply`/`forward`
-are three separate toggles (e.g. "can reply to threads but never cold-send")
-even though all three need only `Mail.Send` — any one of them enabled pulls in
-the allowlist group and transport rule.
+Two things worth calling out: `markRead`, `move`, `copy`, `delete`,
+`categorize`, `flag`, `importance`, and `focus` are eight separate toggles an
+operator may want independently, but every one of them PATCHes (or deletes)
+the mailbox, so **all eight share the same `Mail.ReadWrite` role** — enabling
+any one of them is what triggers the upgrade from `Mail.Read`, not any
+particular combination. And `send`/`reply`/`forward` are three separate
+toggles (e.g. "can reply to threads but never cold-send") even though all
+three need only `Mail.Send` — any one of them enabled pulls in the allowlist
+group and transport rule. `archive` isn't its own capability: Graph treats
+"Archive" as a well-known folder, so `move <id> --to archive` already works
+under the `move` capability.
 
 Say no to everything except reading during `init` for a fully **read-only**
 identity: no allowlist group, no transport rule, and the admin only ever
@@ -106,10 +117,10 @@ Each time, it picks up at the first incomplete step:
 1. **Prereqs** — checks `openssl` is on `PATH` and that Microsoft's login/Graph
    endpoints are reachable.
 2. **Collect** — prompts for tenant ID, client ID, mailbox address, then asks
-   about each capability (markRead, download, move, send, reply, forward) in
-   turn. The allowlist group address is only asked if you enable send, reply,
-   or forward. Finally, an optional "negative test" mailbox the app should
-   *never* be able to reach.
+   about each capability (markRead, download, move, copy, delete, categorize,
+   flag, importance, focus, send, reply, forward) in turn. The allowlist group
+   address is only asked if you enable send, reply, or forward. Finally, an
+   optional "negative test" mailbox the app should *never* be able to reach.
 3. **Cert** — generates an RSA-4096 self-signed certificate locally and prints
    exactly what to upload to Entra (file + SHA-256 thumbprint). The private
    key never leaves your machine.

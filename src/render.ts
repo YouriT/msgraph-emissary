@@ -16,7 +16,7 @@ import { join } from "node:path";
 import adminMdTemplate from "../admin/ADMIN.md.tmpl" with { type: "text" };
 import ps1Template from "../admin/setup-admin.ps1.tmpl" with { type: "text" };
 import { adminHandoffDir } from "./config.ts";
-import { type Config, needsReadWrite, needsSend } from "./types.ts";
+import { type Capabilities, type Config, needsReadWrite, needsSend } from "./types.ts";
 
 /** Derive a filesystem/identifier-safe token from the mailbox local part. */
 function slug(mailbox: string): string {
@@ -57,7 +57,27 @@ export interface RenderFlags {
 }
 
 /** Capability keys in the order they're listed everywhere (docs, prompts, summaries). */
-const CAPABILITY_ORDER = ["markRead", "download", "move", "send", "reply", "forward"] as const;
+const CAPABILITY_ORDER = [
+  "markRead",
+  "download",
+  "move",
+  "copy",
+  "delete",
+  "categorize",
+  "flag",
+  "importance",
+  "focus",
+  "send",
+  "reply",
+  "forward",
+] as const satisfies readonly (keyof Capabilities)[];
+
+// Compile-time guard: if `Capabilities` grows a key not listed above, this
+// line fails to typecheck (with the missing key name in the error) instead
+// of silently dropping it from every summary/admin-pack rendering forever.
+type _MissingFromCapabilityOrder = Exclude<keyof Capabilities, (typeof CAPABILITY_ORDER)[number]>;
+const _capabilityOrderIsExhaustive: _MissingFromCapabilityOrder extends never ? true : never = true;
+void _capabilityOrderIsExhaustive;
 
 /** Compute the full set of substitution values from config + cert thumbprint. */
 export function deriveValues(cfg: Config, thumbprint: string): RenderValues {

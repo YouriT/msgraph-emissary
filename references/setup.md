@@ -19,17 +19,27 @@ Graph/Exchange permissions:
 | Capability | Unlocks | Exchange RBAC role needed | Extra admin work |
 |---|---|---|---|
 | *(always on)* | `inbox`/`unread`/`search`/`read`/`folders`/`stats`/`attachments` | `Application Mail.Read` | none |
-| `markRead` | marking read when `read` views a message | upgrades to `Application Mail.ReadWrite` | none |
+| `markRead` | marking read when `read` views a message, plus `mark` | upgrades to `Application Mail.ReadWrite` | none |
 | `download` | `download` (attachment bytes to disk) | stays on `Application Mail.Read` | none |
-| `move` | `move` | upgrades to `Application Mail.ReadWrite` | none |
+| `move` | `move` (incl. `--to archive`) | upgrades to `Application Mail.ReadWrite` | none |
+| `copy` | `copy` | upgrades to `Application Mail.ReadWrite` | none |
+| `delete` | `delete` | upgrades to `Application Mail.ReadWrite` | none |
+| `categorize` | `categorize` | upgrades to `Application Mail.ReadWrite` | none |
+| `flag` | `flag` | upgrades to `Application Mail.ReadWrite` | none |
+| `importance` | `importance` | upgrades to `Application Mail.ReadWrite` | none |
+| `focus` | `focus` | upgrades to `Application Mail.ReadWrite` | none |
 | `send` | `send` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
 | `reply` | `reply` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
 | `forward` | `forward` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
 
-`markRead` and `move` share a role (both write the mailbox) even though
-they're separate toggles; `download` doesn't need write access at all despite
-being gated. `send`/`reply`/`forward` are separate toggles that all need only
-`Mail.Send` — any one of them enabled requires step 7 in full.
+`markRead`, `move`, `copy`, `delete`, `categorize`, `flag`, `importance`, and
+`focus` all share one role (every one of them writes the mailbox) even though
+they're eight separate toggles — enabling any single one is what triggers the
+upgrade from `Mail.Read` to `Mail.ReadWrite`. `download` doesn't need write
+access at all despite being gated. `send`/`reply`/`forward` are separate
+toggles that all need only `Mail.Send` — any one of them enabled requires step
+7 in full. There's no separate "archive" capability: Graph treats "Archive" as
+a well-known folder, so `move --to archive` already works under `move`.
 
 An identity with everything off except viewing skips step 7 entirely, only
 ever needs `Mail.Read` granted in step 4, and never sees an allowlist. The
@@ -76,7 +86,7 @@ capabilities you chose in step 0, then **Grant admin consent**:
 | Permission | Needed for | Why Emissary needs it |
 |---|---|---|
 | `Mail.Read` | always | Read messages in the mailbox (narrowed by RBAC in step 6). |
-| `Mail.ReadWrite` | `move` or `markRead` | Move messages / mark them read — supersedes `Mail.Read` above; grant one or the other, not both. |
+| `Mail.ReadWrite` | any of `move`, `markRead`, `copy`, `delete`, `categorize`, `flag`, `importance`, `focus` | Write access to the mailbox — supersedes `Mail.Read` above; grant one or the other, not both. |
 | `Mail.Send` | `send`, `reply`, or `forward` | Send/reply/forward from the mailbox (narrowed by RBAC). |
 | `Group.Read.All` | `send`, `reply`, or `forward` | Look up the allowlist group by its mail address. |
 | `GroupMember.Read.All` | `send`, `reply`, or `forward` | Read the group's transitive membership (the allowlist). |
@@ -119,9 +129,9 @@ New-ManagementScope -Name "Emissary-agent-Scope" -RecipientRestrictionFilter "Cu
 
 # 6d. Scoped role assignment(s) — the app's Mail.* now apply to the tagged mailbox only.
 #     Pick the role(s) matching step 0's capability choice:
-#       view-only (nothing else enabled)  -> "Application Mail.Read" only
-#       move or markRead enabled          -> "Application Mail.ReadWrite" instead of Mail.Read
-#       send, reply, or forward enabled   -> also add "Application Mail.Send"
+#       view-only (nothing else enabled)                              -> "Application Mail.Read" only
+#       any of move/markRead/copy/delete/categorize/flag/importance/focus -> "Application Mail.ReadWrite" instead of Mail.Read
+#       send, reply, or forward enabled                               -> also add "Application Mail.Send"
 New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailReadWrite" -App <CLIENT_ID> -Role "Application Mail.ReadWrite" -CustomResourceScope "Emissary-agent-Scope"
 New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailSend"      -App <CLIENT_ID> -Role "Application Mail.Send"      -CustomResourceScope "Emissary-agent-Scope"
 ```

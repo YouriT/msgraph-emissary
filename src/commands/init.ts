@@ -95,13 +95,32 @@ async function collectInteractive(): Promise<Config> {
     const mailbox = await askRequiredEmail(rl, "Shared mailbox address (e.g. agent@contoso.com)");
 
     printErrLine("\nReading and listing mail is always enabled. Choose any extra capabilities needed:");
-    const markRead = await askYesNo(rl, "  Mark messages as read when viewed?", false);
+    const markRead = await askYesNo(rl, "  Mark messages as read/unread?", false);
     const download = await askYesNo(rl, "  Download attachments to disk?", false);
     const move = await askYesNo(rl, "  Move messages between folders?", false);
+    const copy = await askYesNo(rl, "  Copy messages into another folder?", false);
+    const del = await askYesNo(rl, "  Delete messages?", false);
+    const categorize = await askYesNo(rl, "  Add/remove categories on messages?", false);
+    const flag = await askYesNo(rl, "  Set the follow-up flag on messages?", false);
+    const importance = await askYesNo(rl, "  Set message importance (low/normal/high)?", false);
+    const focus = await askYesNo(rl, "  Reclassify messages as Focused/Other?", false);
     const send = await askYesNo(rl, "  Send new messages?", false);
     const reply = await askYesNo(rl, "  Reply to messages?", false);
     const forward = await askYesNo(rl, "  Forward messages?", false);
-    const capabilities: Capabilities = { markRead, download, move, send, reply, forward };
+    const capabilities: Capabilities = {
+      markRead,
+      download,
+      move,
+      copy,
+      delete: del,
+      categorize,
+      flag,
+      importance,
+      focus,
+      send,
+      reply,
+      forward,
+    };
 
     let allowlistGroup: string | undefined;
     if (needsSend(capabilities)) {

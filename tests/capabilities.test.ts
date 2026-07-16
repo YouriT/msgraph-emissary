@@ -1,13 +1,12 @@
 /**
- * Every write-ish action (markRead, download, move, send, reply, forward)
- * must refuse outright when ITS OWN capability is disabled, BEFORE ever
- * creating a Graph client — a read-only identity should never even attempt a
- * network call for an action it isn't allowed to take. Also guards against a
- * real bug class: reply/forward must check their OWN flag, not fall back to
- * checking `send` (they used to, incorrectly, share one combined check).
- * Drives the real command handlers against a temp XDG_CONFIG_HOME; no fetch
- * mock installed, so a stray Graph call would surface as an unhandled network
- * error rather than silently pass.
+ * Every write-ish action must refuse outright when ITS OWN capability is
+ * disabled, BEFORE ever creating a Graph client — a read-only identity should
+ * never even attempt a network call for an action it isn't allowed to take.
+ * Also guards against a real bug class: reply/forward must check their OWN
+ * flag, not fall back to checking `send` (they used to, incorrectly, share
+ * one combined check). Drives the real command handlers against a temp
+ * XDG_CONFIG_HOME; no fetch mock installed, so a stray Graph call would
+ * surface as an unhandled network error rather than silently pass.
  */
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
@@ -15,8 +14,15 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { allowlistCommand } from "../src/commands/allowlist.ts";
+import { categorizeCommand } from "../src/commands/categorize.ts";
+import { copyCommand } from "../src/commands/copy.ts";
+import { deleteCommand } from "../src/commands/delete.ts";
 import { downloadCommand } from "../src/commands/download.ts";
+import { flagCommand } from "../src/commands/flag.ts";
+import { focusCommand } from "../src/commands/focus.ts";
 import { forwardCommand } from "../src/commands/forward.ts";
+import { importanceCommand } from "../src/commands/importance.ts";
+import { markCommand } from "../src/commands/mark.ts";
 import { moveCommand } from "../src/commands/move.ts";
 import { replyCommand } from "../src/commands/reply.ts";
 import { sendCommand } from "../src/commands/send.ts";
@@ -53,6 +59,12 @@ const ALL_OFF: Capabilities = {
   markRead: false,
   download: false,
   move: false,
+  copy: false,
+  delete: false,
+  categorize: false,
+  flag: false,
+  importance: false,
+  focus: false,
   send: false,
   reply: false,
   forward: false,
@@ -80,11 +92,60 @@ test("move refuses when capabilities.move is disabled", async () => {
   expect(chunks.join("")).toContain("capabilities.move");
 });
 
+test("copy refuses when capabilities.copy is disabled", async () => {
+  await writeConfig({});
+  const code = await copyCommand(["abc123", "--to", "Archive"]);
+  expect(code).toBe(1);
+  expect(chunks.join("")).toContain("capabilities.copy");
+});
+
+test("delete refuses when capabilities.delete is disabled", async () => {
+  await writeConfig({});
+  const code = await deleteCommand(["abc123"]);
+  expect(code).toBe(1);
+  expect(chunks.join("")).toContain("capabilities.delete");
+});
+
 test("download refuses when capabilities.download is disabled", async () => {
   await writeConfig({});
   const code = await downloadCommand(["abc123", "file.pdf"]);
   expect(code).toBe(1);
   expect(chunks.join("")).toContain("capabilities.download");
+});
+
+test("mark refuses when capabilities.markRead is disabled", async () => {
+  await writeConfig({});
+  const code = await markCommand(["abc123", "--read"]);
+  expect(code).toBe(1);
+  expect(chunks.join("")).toContain("capabilities.markRead");
+});
+
+test("categorize refuses when capabilities.categorize is disabled", async () => {
+  await writeConfig({});
+  const code = await categorizeCommand(["abc123", "--add", "Foo"]);
+  expect(code).toBe(1);
+  expect(chunks.join("")).toContain("capabilities.categorize");
+});
+
+test("flag refuses when capabilities.flag is disabled", async () => {
+  await writeConfig({});
+  const code = await flagCommand(["abc123", "--status", "flagged"]);
+  expect(code).toBe(1);
+  expect(chunks.join("")).toContain("capabilities.flag");
+});
+
+test("importance refuses when capabilities.importance is disabled", async () => {
+  await writeConfig({});
+  const code = await importanceCommand(["abc123", "--level", "high"]);
+  expect(code).toBe(1);
+  expect(chunks.join("")).toContain("capabilities.importance");
+});
+
+test("focus refuses when capabilities.focus is disabled", async () => {
+  await writeConfig({});
+  const code = await focusCommand(["abc123", "--as", "focused"]);
+  expect(code).toBe(1);
+  expect(chunks.join("")).toContain("capabilities.focus");
 });
 
 test("send refuses when capabilities.send is disabled", async () => {
