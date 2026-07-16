@@ -7,7 +7,7 @@ description: >-
   flag, mark read/unread, importance, and calendar-adjacent mailbox tasks when
   acting as an agent's own mailbox identity (not a person's account). App-only,
   certificate auth; every send is checked against an allowlist.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # Emissary

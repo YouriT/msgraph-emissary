@@ -1,6 +1,6 @@
 {
   "name": "emissary",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Governed Microsoft 365 shared-mailbox identity for AI agents (app-only, certificate auth, Exchange RBAC + preflight allowlist).",
   "type": "module",
   "bin": {
