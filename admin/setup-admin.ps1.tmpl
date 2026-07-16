@@ -70,7 +70,13 @@ if (-not $sp) {
 $mbx = Get-Mailbox -Identity $Mailbox
 if ($mbx.$CustomAttr -ne $CustomAttrValue) {
   Write-Host "Setting $CustomAttr=$CustomAttrValue on $Mailbox ..."
-  Set-Mailbox -Identity $Mailbox -$CustomAttr $CustomAttrValue
+  # Set-Mailbox has no generic "-CustomAttributeName value" parameter — its
+  # 15 custom attributes are fixed, individually named parameters. Splatting
+  # is the only way to pick one by a variable holding its name: a hashtable
+  # key written as an expression (here, $CustomAttr) is evaluated to its
+  # string value, which then matches the real -CustomAttribute15 parameter.
+  $setMailboxParams = @{ Identity = $Mailbox; $CustomAttr = $CustomAttrValue }
+  Set-Mailbox @setMailboxParams
 } else {
   Write-Host "$Mailbox already tagged ($CustomAttr=$CustomAttrValue)"
 }
