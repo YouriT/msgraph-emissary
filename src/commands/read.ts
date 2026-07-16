@@ -2,8 +2,10 @@
  * `emissary read <id>` — fetch one message in full.
  *
  * The body is untrusted: it is HTML-stripped, truncated, and prefixed with an
- * injection notice by projectFull(). Also marks the message read as a side
- * effect (matches inbox-tool expectations); failures to mark are non-fatal.
+ * injection notice by projectFull(). Optionally marks the message read as a
+ * side effect (matches inbox-tool expectations) — gated behind
+ * capabilities.markRead since it PATCHes the mailbox (needs Mail.ReadWrite,
+ * not just Mail.Read); failures to mark are non-fatal either way.
  */
 
 import { parseArgs } from "../args.ts";
@@ -25,7 +27,7 @@ export async function readCommand(args: string[]): Promise<number> {
   const msg = await getMessage(graph, cfg, id);
 
   // Best-effort mark-as-read; never fail the read over it.
-  if (msg.isRead === false) {
+  if (cfg.capabilities.markRead && msg.isRead === false) {
     await graph.patch(usersPath(cfg.mailbox, "messages", id), { isRead: true }).catch(() => {});
   }
 

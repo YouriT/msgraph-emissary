@@ -16,7 +16,7 @@ import { join } from "node:path";
 import adminMdTemplate from "../admin/ADMIN.md.tmpl" with { type: "text" };
 import ps1Template from "../admin/setup-admin.ps1.tmpl" with { type: "text" };
 import { adminHandoffDir } from "./config.ts";
-import type { Config } from "./types.ts";
+import { type Config, needsReadWrite, needsSend } from "./types.ts";
 
 /** Derive a filesystem/identifier-safe token from the mailbox local part. */
 function slug(mailbox: string): string {
@@ -45,32 +45,35 @@ export interface RenderValues {
   MAIL_ROLES_PS_ARRAY: string;
   /** e.g. "Mail.Read" or "Mail.ReadWrite, Mail.Send" — for the Graph-permission list. */
   MAIL_GRAPH_PERMISSIONS: string;
-  /** e.g. "read" / "read, move" / "read, move, send". */
+  /** e.g. "read" / "read, move, markRead" / "read, download, send, reply". */
   CAPABILITIES_SUMMARY: string;
 }
 
 export interface RenderFlags {
-  MOVE: boolean;
+  /** True if send/reply/forward is enabled — pulls in the allowlist + transport rule. */
   SEND: boolean;
   /** Convenience negation of SEND — templates can't express `{{^SEND}}`, only `{{#FLAG}}`. */
   SEND_DISABLED: boolean;
 }
 
+/** Capability keys in the order they're listed everywhere (docs, prompts, summaries). */
+const CAPABILITY_ORDER = ["markRead", "download", "move", "send", "reply", "forward"] as const;
+
 /** Compute the full set of substitution values from config + cert thumbprint. */
 export function deriveValues(cfg: Config, thumbprint: string): RenderValues {
   const s = slug(cfg.mailbox);
-  const { move, send } = cfg.capabilities;
+  const caps = cfg.capabilities;
+  const readWrite = needsReadWrite(caps);
+  const send = needsSend(caps);
 
-  const mailRoles = [move ? "Application Mail.ReadWrite" : "Application Mail.Read"];
-  const mailGraphPerms = [move ? "Mail.ReadWrite" : "Mail.Read"];
+  const mailRoles = [readWrite ? "Application Mail.ReadWrite" : "Application Mail.Read"];
+  const mailGraphPerms = [readWrite ? "Mail.ReadWrite" : "Mail.Read"];
   if (send) {
     mailRoles.push("Application Mail.Send");
     mailGraphPerms.push("Mail.Send");
   }
 
-  const capSummary = ["read", move ? "move" : undefined, send ? "send" : undefined]
-    .filter((c): c is string => Boolean(c))
-    .join(", ");
+  const capSummary = ["read", ...CAPABILITY_ORDER.filter((k) => caps[k])].join(", ");
 
   return {
     TENANT_ID: cfg.tenantId,
@@ -92,7 +95,8 @@ export function deriveValues(cfg: Config, thumbprint: string): RenderValues {
 }
 
 export function deriveFlags(cfg: Config): RenderFlags {
-  return { MOVE: cfg.capabilities.move, SEND: cfg.capabilities.send, SEND_DISABLED: !cfg.capabilities.send };
+  const send = needsSend(cfg.capabilities);
+  return { SEND: send, SEND_DISABLED: !send };
 }
 
 /**

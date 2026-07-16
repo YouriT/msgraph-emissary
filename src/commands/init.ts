@@ -31,7 +31,13 @@ import { generateCert, opensslAvailable } from "../openssl.ts";
 import { printErrLine, printJson } from "../output.ts";
 import { renderAdminPack } from "../render.ts";
 import { loadOnboarding, markStep, ONBOARDING_STEPS, stepStatus } from "../state.ts";
-import type { Config, OnboardingState, OnboardingStep } from "../types.ts";
+import {
+  type Capabilities,
+  type Config,
+  needsSend,
+  type OnboardingState,
+  type OnboardingStep,
+} from "../types.ts";
 import { probeAllowlist, probeNegative, probeRead, probeToken } from "./doctor.ts";
 
 type StepResult = "done" | "blocked";
@@ -88,12 +94,17 @@ async function collectInteractive(): Promise<Config> {
     const clientId = await askRequired(rl, "App (client) ID");
     const mailbox = await askRequiredEmail(rl, "Shared mailbox address (e.g. agent@contoso.com)");
 
-    printErrLine("\nReading mail is always enabled. Choose any extra capabilities this identity needs:");
-    const move = await askYesNo(rl, "  Allow moving messages between folders?", false);
-    const send = await askYesNo(rl, "  Allow sending mail (send/reply/forward)?", false);
+    printErrLine("\nReading and listing mail is always enabled. Choose any extra capabilities needed:");
+    const markRead = await askYesNo(rl, "  Mark messages as read when viewed?", false);
+    const download = await askYesNo(rl, "  Download attachments to disk?", false);
+    const move = await askYesNo(rl, "  Move messages between folders?", false);
+    const send = await askYesNo(rl, "  Send new messages?", false);
+    const reply = await askYesNo(rl, "  Reply to messages?", false);
+    const forward = await askYesNo(rl, "  Forward messages?", false);
+    const capabilities: Capabilities = { markRead, download, move, send, reply, forward };
 
     let allowlistGroup: string | undefined;
-    if (send) {
+    if (needsSend(capabilities)) {
       allowlistGroup = await askRequiredEmail(
         rl,
         "Allowlist group address (e.g. emissary-allowed@contoso.com)",
@@ -107,7 +118,7 @@ async function collectInteractive(): Promise<Config> {
       tenantId,
       clientId,
       mailbox,
-      capabilities: { move, send },
+      capabilities,
       certPath: defaultCertPath(),
       keyPath: defaultKeyPath(),
     };

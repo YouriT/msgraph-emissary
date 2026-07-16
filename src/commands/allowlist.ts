@@ -4,15 +4,16 @@ import { resolveAllowlist } from "../allowlist.ts";
 import { loadConfig } from "../config.ts";
 import { Graph } from "../graph.ts";
 import { printJson } from "../output.ts";
+import { needsSend } from "../types.ts";
 
 export async function allowlistCommand(_args: string[]): Promise<number> {
   const cfg = await loadConfig();
-  if (!cfg.capabilities.send || !cfg.allowlistGroup) {
+  if (!needsSend(cfg.capabilities) || !cfg.allowlistGroup) {
     printJson({
       ok: true,
       group: null,
       members: [],
-      note: "sending is disabled for this identity (capabilities.send is not enabled) — no allowlist applies",
+      note: "send, reply, and forward are all disabled for this identity — no allowlist applies",
     });
     return 0;
   }

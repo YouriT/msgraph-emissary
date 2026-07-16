@@ -11,20 +11,30 @@ means and how to do it by hand.
 
 ## 0. Choose capabilities (operator)
 
-Reading mail is always on — it's the point of the identity. Everything past
-that is opt-in, and it changes what the rest of this walkthrough actually
-requires:
+Listing/viewing mail is always on — it's the point of the identity. Everything
+past that is an independent, deny-by-default toggle, and it changes what the
+rest of this walkthrough actually requires. The toggles are NOT a 1:1 mirror of
+Graph/Exchange permissions:
 
-| Capability | Unlocks | Exchange RBAC role | Extra admin work |
+| Capability | Unlocks | Exchange RBAC role needed | Extra admin work |
 |---|---|---|---|
-| `read` (always on) | `inbox`/`unread`/`search`/`read`/`folders`/`stats`/`attachments`/`download` | `Application Mail.Read` | none |
+| *(always on)* | `inbox`/`unread`/`search`/`read`/`folders`/`stats`/`attachments` | `Application Mail.Read` | none |
+| `markRead` | marking read when `read` views a message | upgrades to `Application Mail.ReadWrite` | none |
+| `download` | `download` (attachment bytes to disk) | stays on `Application Mail.Read` | none |
 | `move` | `move` | upgrades to `Application Mail.ReadWrite` | none |
-| `send` | `send`/`reply`/`forward` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
+| `send` | `send` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
+| `reply` | `reply` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
+| `forward` | `forward` | adds `Application Mail.Send` | allowlist group (step 7) + transport rule |
 
-A read-only identity (`move` and `send` both off) skips step 7 entirely, only
+`markRead` and `move` share a role (both write the mailbox) even though
+they're separate toggles; `download` doesn't need write access at all despite
+being gated. `send`/`reply`/`forward` are separate toggles that all need only
+`Mail.Send` — any one of them enabled requires step 7 in full.
+
+An identity with everything off except viewing skips step 7 entirely, only
 ever needs `Mail.Read` granted in step 4, and never sees an allowlist. The
-examples below show the **full** (`move` + `send`) case; drop what you don't
-need.
+examples below show the **full** (every capability on) case; drop what you
+don't need.
 
 ## 1. Create the shared mailbox (admin)
 
@@ -66,12 +76,12 @@ capabilities you chose in step 0, then **Grant admin consent**:
 | Permission | Needed for | Why Emissary needs it |
 |---|---|---|
 | `Mail.Read` | always | Read messages in the mailbox (narrowed by RBAC in step 6). |
-| `Mail.ReadWrite` | `move` | Move/mark messages — supersedes `Mail.Read` above; grant one or the other, not both. |
-| `Mail.Send` | `send` | Send/reply/forward from the mailbox (narrowed by RBAC). |
-| `Group.Read.All` | `send` | Look up the allowlist group by its mail address. |
-| `GroupMember.Read.All` | `send` | Read the group's transitive membership (the allowlist). |
-| `User.ReadBasic.All` | `send` | Resolve member users' email/UPN. |
-| `OrgContact.Read.All` | `send` | Resolve mail-contact members of the group. |
+| `Mail.ReadWrite` | `move` or `markRead` | Move messages / mark them read — supersedes `Mail.Read` above; grant one or the other, not both. |
+| `Mail.Send` | `send`, `reply`, or `forward` | Send/reply/forward from the mailbox (narrowed by RBAC). |
+| `Group.Read.All` | `send`, `reply`, or `forward` | Look up the allowlist group by its mail address. |
+| `GroupMember.Read.All` | `send`, `reply`, or `forward` | Read the group's transitive membership (the allowlist). |
+| `User.ReadBasic.All` | `send`, `reply`, or `forward` | Resolve member users' email/UPN. |
+| `OrgContact.Read.All` | `send`, `reply`, or `forward` | Resolve mail-contact members of the group. |
 
 > Whichever Mail.* permission you grant is tenant-wide *until* the Exchange
 > RBAC scope in step 6 restricts it to the single mailbox. Do both.
@@ -109,9 +119,9 @@ New-ManagementScope -Name "Emissary-agent-Scope" -RecipientRestrictionFilter "Cu
 
 # 6d. Scoped role assignment(s) — the app's Mail.* now apply to the tagged mailbox only.
 #     Pick the role(s) matching step 0's capability choice:
-#       read-only  -> "Application Mail.Read" only
-#       move       -> "Application Mail.ReadWrite" instead of Mail.Read
-#       send       -> also add "Application Mail.Send"
+#       view-only (nothing else enabled)  -> "Application Mail.Read" only
+#       move or markRead enabled          -> "Application Mail.ReadWrite" instead of Mail.Read
+#       send, reply, or forward enabled   -> also add "Application Mail.Send"
 New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailReadWrite" -App <CLIENT_ID> -Role "Application Mail.ReadWrite" -CustomResourceScope "Emissary-agent-Scope"
 New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailSend"      -App <CLIENT_ID> -Role "Application Mail.Send"      -CustomResourceScope "Emissary-agent-Scope"
 ```
@@ -119,7 +129,7 @@ New-ManagementRoleAssignment -Name "Emissary-agent-ApplicationMailSend"      -Ap
 **Do not use Application Access Policies** — they are deprecated. Exchange RBAC
 for Applications (above) is the supported mechanism.
 
-## 7. Allowlist group + transport rule (admin) — only if `send` is enabled
+## 7. Allowlist group + transport rule (admin) — only if send, reply, or forward is enabled
 
 ```powershell
 # Outbound allowlist: membership = who Emissary may email
@@ -141,8 +151,9 @@ emissary doctor
 
 `doctor` acquires a token, reads the target mailbox, runs the **negative test**
 (reading a mailbox it must not reach — expects `403`, if a negative-test
-mailbox was configured), and — only if `send` is enabled — resolves the
-allowlist. All green means the configured capabilities are enforced as scoped.
+mailbox was configured), and — only if send, reply, or forward is enabled —
+resolves the allowlist. All green means the configured capabilities are
+enforced as scoped.
 
 ## Notes
 

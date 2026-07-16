@@ -28,26 +28,40 @@ person as the operator).
 - A shared mailbox (e.g. `agent@contoso.com`) — no license, no interactive
   sign-in. Ask your admin to create one if it doesn't exist:
   `New-Mailbox -Shared -Name "Agent Mailbox" -PrimarySmtpAddress agent@contoso.com`
-- **Only if this identity needs to send mail:** a mail-enabled group whose
-  membership will be the send allowlist (e.g. `emissary-allowed@contoso.com`).
-  Read-only and move-only identities don't need this at all — see
-  **Capabilities** below.
+- **Only if this identity replies, forwards, or sends mail:** a mail-enabled
+  group whose membership will be the outbound allowlist (e.g.
+  `emissary-allowed@contoso.com`). Purely read-side identities don't need this
+  at all — see **Capabilities** below.
 
 ### Capabilities
 
-Reading mail is always on — it's the point of the identity. Everything else is
-opt-in, and `init` asks about it directly:
+Reading and listing mail is always on — it's the point of the identity.
+Everything else is an independent, deny-by-default toggle, and `init` asks
+about each one directly. The toggles aren't a 1:1 mirror of Graph/Exchange
+permissions — some share a role for reasons that aren't obvious upfront:
 
-| Capability | Unlocks | Extra Exchange RBAC role | Extra admin work |
+| Capability | Unlocks | Exchange RBAC role needed | Extra admin work |
 |---|---|---|---|
-| `read` (always on) | `inbox`, `unread`, `search`, `read`, `folders`, `stats`, `attachments`, `download` | `Application Mail.Read` | none |
+| *(always on)* | `inbox`, `unread`, `search`, `read`, `folders`, `stats`, `attachments` | `Application Mail.Read` | none |
+| `markRead` | marking a message read when `read` views it | upgrades to `Application Mail.ReadWrite` (it's a write) | none |
+| `download` | `download` (saving attachment bytes to disk) | stays on `Application Mail.Read` — reading bytes isn't a write | none |
 | `move` | `move` (between folders) | upgrades to `Application Mail.ReadWrite` | none |
-| `send` | `send`, `reply`, `forward` | adds `Application Mail.Send` | allowlist group + transport rule |
+| `send` | `send` (compose new mail) | adds `Application Mail.Send` | allowlist group + transport rule |
+| `reply` | `reply` | adds `Application Mail.Send` | allowlist group + transport rule |
+| `forward` | `forward` | adds `Application Mail.Send` | allowlist group + transport rule |
 
-Say no to `move` and `send` during `init` for a **read-only** identity: no
-allowlist group, no transport rule, and the admin only ever grants `Mail.Read`
-— the smallest possible footprint. Commands outside the enabled capabilities
-refuse immediately with a clear error, before any Graph call is attempted.
+Two things worth calling out: `markRead` and `move` are separate toggles an
+operator may want independently, but both require the same `Mail.ReadWrite`
+role, since marking read is itself a mailbox write. And `send`/`reply`/`forward`
+are three separate toggles (e.g. "can reply to threads but never cold-send")
+even though all three need only `Mail.Send` — any one of them enabled pulls in
+the allowlist group and transport rule.
+
+Say no to everything except reading during `init` for a fully **read-only**
+identity: no allowlist group, no transport rule, and the admin only ever
+grants `Mail.Read` — the smallest possible footprint. Commands outside the
+enabled capabilities refuse immediately with a clear error, before any Graph
+call is attempted.
 
 ### 1. Get the binary
 
@@ -92,9 +106,10 @@ Each time, it picks up at the first incomplete step:
 1. **Prereqs** — checks `openssl` is on `PATH` and that Microsoft's login/Graph
    endpoints are reachable.
 2. **Collect** — prompts for tenant ID, client ID, mailbox address, then asks
-   which capabilities this identity needs (move, send). The allowlist group
-   address is only asked if you enable send. Finally, an optional "negative
-   test" mailbox the app should *never* be able to reach.
+   about each capability (markRead, download, move, send, reply, forward) in
+   turn. The allowlist group address is only asked if you enable send, reply,
+   or forward. Finally, an optional "negative test" mailbox the app should
+   *never* be able to reach.
 3. **Cert** — generates an RSA-4096 self-signed certificate locally and prints
    exactly what to upload to Entra (file + SHA-256 thumbprint). The private
    key never leaves your machine.
@@ -116,7 +131,7 @@ need to run: `setup-admin.ps1`, which is idempotent). They'll need to:
   [`references/setup.md`](references/setup.md)) and paste it into the script,
 - Run `setup-admin.ps1` (creates the Exchange service principal, tags the
   mailbox, and scopes the RBAC role assignment(s) — plus the allowlist group
-  and transport rule, only if this identity's send capability is enabled).
+  and transport rule, only if send, reply, or forward is enabled).
 
 ### 4. Re-run to verify
 
@@ -126,9 +141,9 @@ need to run: `setup-admin.ps1`, which is idempotent). They'll need to:
 
 Once the admin is done, re-running `init` resumes from where it left off and
 **verifies each admin-dependent step live** — token acquisition, a real mailbox
-read, the negative test (must come back `403`), and (if send is enabled)
-allowlist resolution — never assuming success. It finishes with a one-screen
-security posture summary.
+read, the negative test (must come back `403`), and (if send, reply, or
+forward is enabled) allowlist resolution — never assuming success. It finishes
+with a one-screen security posture summary.
 
 You can also jump straight to the self-test at any time:
 
@@ -170,13 +185,13 @@ separate, so a mistake in one cannot widen the other.
 | **Shared mailbox** | No license, no interactive sign-in. There is no user to phish. |
 | **Certificate-only app** | Single-tenant Entra app, certificate credential. **No client secrets, no delegated flows, no refresh tokens.** The private key stays local (`chmod 600`); only the public cert is uploaded. |
 | **App-only tokens** | Minted per invocation, in memory, never written to disk, never printed. There is no `token get` command. |
-| **Exchange RBAC for Applications** | A management scope on a mailbox custom attribute + role assignment(s) — `Application Mail.Read` (always), upgraded to `Mail.ReadWrite` if `move` is enabled, plus `Mail.Send` if `send` is enabled — constrain the app to the one tagged mailbox and to only the roles it actually needs. This is the modern replacement for the deprecated Application Access Policies. |
+| **Exchange RBAC for Applications** | A management scope on a mailbox custom attribute + role assignment(s) — `Application Mail.Read` (always), upgraded to `Mail.ReadWrite` if `move` or `markRead` is enabled, plus `Mail.Send` if `send`/`reply`/`forward` is enabled — constrain the app to the one tagged mailbox and to only the roles it actually needs. This is the modern replacement for the deprecated Application Access Policies. |
 | **Negative test** | `doctor` actively proves the boundary: it tries to read a mailbox it should *not* reach and expects a `403`. A `200` is a hard failure. |
 
 ### Plane 2 — Outbound control (who can the agent email?)
 
-Only present at all when the `send` capability is enabled — a read-only or
-move-only identity has no allowlist group, no transport rule, and no
+Only present at all when send, reply, or forward is enabled — an identity
+without any of the three has no allowlist group, no transport rule, and no
 `Mail.Send` permission to begin with.
 
 | Control | What it does |

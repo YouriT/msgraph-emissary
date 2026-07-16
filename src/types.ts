@@ -12,18 +12,47 @@
 // ---------------------------------------------------------------------------
 
 /**
- * What this identity is allowed to do beyond reading mail. Reading is always
- * on — it's the point of the identity, and `doctor`'s negative test needs it
- * regardless. Each flag maps 1:1 to an Exchange RBAC application role, so
- * disabling one means the admin never has to grant it:
- *   move -> upgrades the mail role from `Application Mail.Read` to
- *           `Application Mail.ReadWrite` (moving a message is a write).
- *   send -> adds `Application Mail.Send`, the allowlist group, and the
- *           transport rule. Requires `allowlistGroup` to be set.
+ * What this identity is allowed to do beyond reading/listing mail. Reading is
+ * always on — it's the point of the identity, and `doctor`'s negative test
+ * needs it regardless. Each flag is an independent, deny-by-default gate
+ * checked client-side before any Graph call — NOT derived from what Graph
+ * permissions happen to be consented upstream, and NOT all 1:1 with a distinct
+ * Exchange RBAC role. Two are worth calling out because they DON'T map 1:1:
+ *   - `markRead` and `move` are separate actions an operator may want to allow
+ *     independently, but both PATCH the mailbox, so both require the same
+ *     `Application Mail.ReadWrite` role — enabling either upgrades the role.
+ *   - `download` only ever needs `Application Mail.Read` (reading attachment
+ *     bytes isn't a mailbox write), yet it's still its own toggle: writing
+ *     attachment content to local disk is a materially different risk
+ *     (exfiltration to the filesystem) from just viewing message text.
+ * `send`/`reply`/`forward` are separate because they're different actions to
+ * an operator even though all three need only `Application Mail.Send`; any of
+ * them being enabled requires `allowlistGroup` and pulls in the transport
+ * rule + allowlist-resolution Graph permissions.
  */
 export interface Capabilities {
+  /** read.ts's `PATCH isRead:true` side effect. Needs Mail.ReadWrite. */
+  markRead: boolean;
+  /** download.ts writing attachment bytes to disk. Needs only Mail.Read. */
+  download: boolean;
+  /** move.ts. Needs Mail.ReadWrite. */
   move: boolean;
+  /** send.ts (compose new mail). Needs Mail.Send + allowlist. */
   send: boolean;
+  /** reply.ts. Needs Mail.Send + allowlist. */
+  reply: boolean;
+  /** forward.ts. Needs Mail.Send + allowlist. */
+  forward: boolean;
+}
+
+/** True if any capability that submits mail is enabled — these three share the allowlist/transport-rule requirement. */
+export function needsSend(caps: Capabilities): boolean {
+  return caps.send || caps.reply || caps.forward;
+}
+
+/** True if any capability needs write access to the mailbox (beyond reading attachment bytes). */
+export function needsReadWrite(caps: Capabilities): boolean {
+  return caps.move || caps.markRead;
 }
 
 /** Persistent, operator-owned configuration. Lives at $XDG_CONFIG_HOME/emissary/config.json. */
@@ -36,7 +65,7 @@ export interface Config {
   mailbox: string;
   /** What this identity may do beyond reading mail. */
   capabilities: Capabilities;
-  /** Mail-enabled group whose membership is the outbound allowlist. Required iff capabilities.send. */
+  /** Mail-enabled group whose membership is the outbound allowlist. Required iff send/reply/forward is enabled. */
   allowlistGroup?: string;
   /** Path to the PEM certificate (public) uploaded to Entra. */
   certPath: string;

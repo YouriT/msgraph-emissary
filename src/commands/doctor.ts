@@ -7,7 +7,7 @@
  *   3. negative  — are we correctly BLOCKED from a mailbox we shouldn't reach?
  *                  A 403 is a PASS; a 200 is a FAIL (RBAC scope too broad).
  *   4. allowlist — does the outbound allowlist group resolve via Graph?
- *                  Skipped (not a failure) when capabilities.send is disabled.
+ *                  Skipped (not a failure) unless send/reply/forward is enabled.
  *
  * Exit code is non-zero if any hard check fails, so it can gate onboarding and
  * CI. Individual probes are exported so the init wizard can reuse them as gates.
@@ -17,7 +17,7 @@ import { resolveAllowlist } from "../allowlist.ts";
 import { loadConfig } from "../config.ts";
 import { Graph, GraphHttpError, usersPath } from "../graph.ts";
 import { printErrLine, printPrettyJson } from "../output.ts";
-import type { Config } from "../types.ts";
+import { type Config, needsSend } from "../types.ts";
 
 export type CheckStatus = "pass" | "fail" | "warn" | "skip";
 
@@ -81,13 +81,14 @@ export async function probeNegative(graph: Graph, cfg: Config): Promise<Check> {
   };
 }
 
-/** Probe 4: allowlist group resolves. Not applicable when send is disabled — nothing to check. */
+/** Probe 4: allowlist group resolves. Not applicable unless send/reply/forward is enabled. */
 export async function probeAllowlist(graph: Graph, cfg: Config): Promise<Check> {
-  if (!cfg.capabilities.send || !cfg.allowlistGroup) {
+  if (!needsSend(cfg.capabilities) || !cfg.allowlistGroup) {
     return {
       name: "allowlist",
       status: "skip",
-      detail: "capabilities.send is disabled — this identity cannot send, so there is no allowlist to check",
+      detail:
+        "send/reply/forward are all disabled — this identity cannot submit mail, so there is no allowlist to check",
     };
   }
   try {

@@ -21,6 +21,14 @@ export async function downloadCommand(args: string[]): Promise<number> {
     return 1;
   }
   const cfg = await loadConfig();
+  if (!cfg.capabilities.download) {
+    printJson(
+      errorResult(
+        "downloading attachments is disabled for this identity (capabilities.download is not enabled)",
+      ),
+    );
+    return 1;
+  }
   const graph = await Graph.create(cfg);
   const id = await resolveMessageId(graph, cfg, given);
 

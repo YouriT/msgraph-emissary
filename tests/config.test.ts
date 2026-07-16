@@ -1,7 +1,9 @@
 /**
- * Config capability invariants: read is always on and free; move/send are
- * opt-in; the allowlist is required if and only if send is enabled — a
- * read-only identity must never be forced to configure one.
+ * Config capability invariants: read is always on and free; every other
+ * capability (markRead, download, move, send, reply, forward) is an
+ * independent, deny-by-default toggle. The allowlist is required if and only
+ * if send, reply, OR forward is enabled — a read-only identity must never be
+ * forced to configure one.
  */
 
 import { expect, test } from "bun:test";
@@ -13,14 +15,24 @@ const BASE = {
   mailbox: "agent@contoso.com",
 };
 
-test("validateConfig defaults to read-only when capabilities is omitted", () => {
+const ALL_OFF = { markRead: false, download: false, move: false, send: false, reply: false, forward: false };
+
+test("validateConfig defaults every capability to false when capabilities is omitted", () => {
   const cfg = validateConfig({ ...BASE });
-  expect(cfg.capabilities).toEqual({ move: false, send: false });
+  expect(cfg.capabilities).toEqual(ALL_OFF);
   expect(cfg.allowlistGroup).toBeUndefined();
 });
 
-test("validateConfig requires allowlistGroup when capabilities.send is true", () => {
+test("validateConfig requires allowlistGroup when send is true", () => {
   expect(() => validateConfig({ ...BASE, capabilities: { send: true } })).toThrow(/allowlistGroup/);
+});
+
+test("validateConfig requires allowlistGroup when only reply is true (not just send)", () => {
+  expect(() => validateConfig({ ...BASE, capabilities: { reply: true } })).toThrow(/allowlistGroup/);
+});
+
+test("validateConfig requires allowlistGroup when only forward is true", () => {
+  expect(() => validateConfig({ ...BASE, capabilities: { forward: true } })).toThrow(/allowlistGroup/);
 });
 
 test("validateConfig accepts send:true with an allowlistGroup", () => {
@@ -33,8 +45,19 @@ test("validateConfig accepts send:true with an allowlistGroup", () => {
   expect(cfg.allowlistGroup).toBe("emissary-allowed@contoso.com");
 });
 
-test("validateConfig does not require allowlistGroup when send is false, even if move is true", () => {
-  const cfg = validateConfig({ ...BASE, capabilities: { move: true, send: false } });
-  expect(cfg.capabilities).toEqual({ move: true, send: false });
+test("validateConfig does not require allowlistGroup for move, markRead, or download alone", () => {
+  const cfg = validateConfig({ ...BASE, capabilities: { move: true, markRead: true, download: true } });
+  expect(cfg.capabilities).toEqual({ ...ALL_OFF, move: true, markRead: true, download: true });
   expect(cfg.allowlistGroup).toBeUndefined();
+});
+
+test("validateConfig keeps reply/forward independent of send", () => {
+  const cfg = validateConfig({
+    ...BASE,
+    capabilities: { reply: true },
+    allowlistGroup: "emissary-allowed@contoso.com",
+  });
+  expect(cfg.capabilities.send).toBe(false);
+  expect(cfg.capabilities.reply).toBe(true);
+  expect(cfg.capabilities.forward).toBe(false);
 });

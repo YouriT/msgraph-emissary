@@ -12,7 +12,7 @@
 import { chmod, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Capabilities, Config } from "./types.ts";
+import { type Capabilities, type Config, needsSend } from "./types.ts";
 
 const APP = "emissary";
 
@@ -60,12 +60,16 @@ export async function ensureStateDir(): Promise<void> {
 
 const REQUIRED_STRING_FIELDS: (keyof Config)[] = ["tenantId", "clientId", "mailbox"];
 
-/** Capability flags default to `false` (read-only) unless explicitly `true`. */
+/** Every capability defaults to `false` (deny-by-default) unless explicitly `true`. */
 function parseCapabilities(raw: unknown): Capabilities {
   const obj = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
   return {
+    markRead: obj.markRead === true,
+    download: obj.download === true,
     move: obj.move === true,
     send: obj.send === true,
+    reply: obj.reply === true,
+    forward: obj.forward === true,
   };
 }
 
@@ -92,13 +96,14 @@ export function validateConfig(raw: unknown): Config {
   const capabilities = parseCapabilities(obj.capabilities);
 
   // The allowlist is only meaningful — and only required — when this identity
-  // can send. A read-only identity never needs one, never gets the extra
-  // Graph permissions, and never triggers the allowlist onboarding gate.
+  // can submit mail (send, reply, or forward). An identity with none of those
+  // enabled never needs one, never gets the extra Graph permissions, and
+  // never triggers the allowlist onboarding gate.
   let allowlistGroup: string | undefined;
   const rawAllowlist = obj.allowlistGroup;
-  if (capabilities.send) {
+  if (needsSend(capabilities)) {
     if (typeof rawAllowlist !== "string" || rawAllowlist.trim().length === 0) {
-      throw new Error('config field "allowlistGroup" is required when capabilities.send is true');
+      throw new Error('config field "allowlistGroup" is required when send, reply, or forward is enabled');
     }
     allowlistGroup = rawAllowlist.trim();
   } else if (typeof rawAllowlist === "string" && rawAllowlist.trim().length > 0) {

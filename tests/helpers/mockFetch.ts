@@ -72,7 +72,7 @@ export const TEST_CONFIG = {
   tenantId: "contoso.onmicrosoft.com",
   clientId: "11111111-2222-3333-4444-555555555555",
   mailbox: "agent@contoso.com",
-  capabilities: { move: true, send: true },
+  capabilities: { markRead: true, download: true, move: true, send: true, reply: true, forward: true },
   allowlistGroup: "emissary-allowed@contoso.com",
   certPath: "/tmp/emissary-test.crt",
   keyPath: "/tmp/emissary-test.key",
