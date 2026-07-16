@@ -26,7 +26,7 @@ import {
   saveConfig,
   validateConfig,
 } from "../config.ts";
-import { Graph } from "../graph.ts";
+import type { Graph } from "../graph.ts";
 import { generateCert, opensslAvailable } from "../openssl.ts";
 import { printErrLine, printJson } from "../output.ts";
 import { renderAdminPack } from "../render.ts";
@@ -214,14 +214,31 @@ async function stepRenderHandoff(): Promise<StepResult> {
   return "done";
 }
 
-/** Shared shape for a verify gate: run a probe, mark done on pass, block otherwise. */
+/** verify-token: probeToken already catches auth failures — never throws uncaught. */
+async function stepVerifyToken(): Promise<StepResult> {
+  const cfg = await loadConfig();
+  const { check } = await probeToken(cfg);
+  printErrLine(`  [${check.status.toUpperCase()}] verify-token: ${check.detail}`);
+  return check.status === "pass" ? "done" : "blocked";
+}
+
+/**
+ * Shared shape for the remaining verify gates: acquire a token (via
+ * probeToken, which catches auth failures instead of throwing — expected
+ * right after `cert` generates a key that isn't uploaded to Entra yet), run
+ * a probe against it, mark done on pass, block otherwise.
+ */
 async function verifyGate(
   name: OnboardingStep,
   run: (graph: Graph, cfg: Config) => Promise<{ status: string; detail: string }>,
   opts: { blockOnWarn?: boolean } = {},
 ): Promise<StepResult> {
   const cfg = await loadConfig();
-  const graph = await Graph.create(cfg);
+  const { check: tokenCheck, graph } = await probeToken(cfg);
+  if (!graph) {
+    printErrLine(`  [${tokenCheck.status.toUpperCase()}] ${name}: ${tokenCheck.detail}`);
+    return "blocked";
+  }
   const check = await run(graph, cfg);
   printErrLine(`  [${check.status.toUpperCase()}] ${name}: ${check.detail}`);
   if (check.status === "pass") return "done";
@@ -237,7 +254,7 @@ const STEP_RUNNERS: Record<OnboardingStep, (ctx: Ctx) => Promise<StepResult>> = 
   collect: (ctx) => stepCollect(ctx),
   cert: () => stepCert(),
   "render-handoff": () => stepRenderHandoff(),
-  "verify-token": () => verifyGate("verify-token", async (_g, cfg) => (await probeToken(cfg)).check),
+  "verify-token": () => stepVerifyToken(),
   "verify-read": () => verifyGate("verify-read", (g, cfg) => probeRead(g, cfg)),
   "verify-negative": () => verifyGate("verify-negative", (g, cfg) => probeNegative(g, cfg)),
   "verify-allowlist": () => verifyGate("verify-allowlist", (g, cfg) => probeAllowlist(g, cfg)),
