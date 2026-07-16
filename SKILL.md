@@ -90,4 +90,6 @@ Two different errors look similar but mean different things:
   recipient isn't on the allowlist.
 
 Either way: do not try to work around it. Ask the operator to enable the
-capability or add the recipient to the allowlist group, if appropriate.
+capability (they can do this without redoing the whole setup — see
+`emissary init --reconfigure` in the README) or add the recipient to the
+allowlist group, if appropriate.

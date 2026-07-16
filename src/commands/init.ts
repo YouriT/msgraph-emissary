@@ -13,10 +13,16 @@
  * Modes:
  *   emissary init                    interactive (prompts on stderr)
  *   emissary init --config file.json non-interactive; same verification gates
+ *   emissary init --reconfigure      re-ask only the capability questions on
+ *                                    an already-configured identity — keeps
+ *                                    tenant/client/mailbox/cert untouched,
+ *                                    regenerates the admin pack (so the admin
+ *                                    sees exactly what changed), and re-runs
+ *                                    every verify gate before trusting it.
  */
 
 import { createInterface } from "node:readline/promises";
-import { parseArgs, strFlag } from "../args.ts";
+import { boolFlag, parseArgs, strFlag } from "../args.ts";
 import { certThumbprintSha256 } from "../auth.ts";
 import {
   configDir,
@@ -28,7 +34,7 @@ import {
 } from "../config.ts";
 import type { Graph } from "../graph.ts";
 import { generateCert, opensslAvailable } from "../openssl.ts";
-import { printErrLine, printJson } from "../output.ts";
+import { errorResult, printErrLine, printJson } from "../output.ts";
 import { renderAdminPack } from "../render.ts";
 import { loadOnboarding, markStep, ONBOARDING_STEPS, stepStatus } from "../state.ts";
 import {
@@ -86,6 +92,56 @@ export async function askYesNo(rl: Asker, prompt: string, defaultValue: boolean)
   }
 }
 
+const DEFAULT_CAPABILITIES: Capabilities = {
+  markRead: false,
+  download: false,
+  move: false,
+  copy: false,
+  delete: false,
+  categorize: false,
+  flag: false,
+  importance: false,
+  focus: false,
+  send: false,
+  reply: false,
+  forward: false,
+};
+
+/**
+ * Ask about every capability, one yes/no per flag. `defaults` seeds each
+ * prompt's answer-on-Enter: fresh setup passes all-false; `--reconfigure`
+ * passes the identity's current capabilities so re-running doesn't force
+ * re-declaring everything already enabled just to add one more.
+ */
+export async function collectCapabilities(rl: Asker, defaults: Capabilities): Promise<Capabilities> {
+  const markRead = await askYesNo(rl, "  Mark messages as read/unread?", defaults.markRead);
+  const download = await askYesNo(rl, "  Download attachments to disk?", defaults.download);
+  const move = await askYesNo(rl, "  Move messages between folders?", defaults.move);
+  const copy = await askYesNo(rl, "  Copy messages into another folder?", defaults.copy);
+  const del = await askYesNo(rl, "  Delete messages?", defaults.delete);
+  const categorize = await askYesNo(rl, "  Add/remove categories on messages?", defaults.categorize);
+  const flag = await askYesNo(rl, "  Set the follow-up flag on messages?", defaults.flag);
+  const importance = await askYesNo(rl, "  Set message importance (low/normal/high)?", defaults.importance);
+  const focus = await askYesNo(rl, "  Reclassify messages as Focused/Other?", defaults.focus);
+  const send = await askYesNo(rl, "  Send new messages?", defaults.send);
+  const reply = await askYesNo(rl, "  Reply to messages?", defaults.reply);
+  const forward = await askYesNo(rl, "  Forward messages?", defaults.forward);
+  return {
+    markRead,
+    download,
+    move,
+    copy,
+    delete: del,
+    categorize,
+    flag,
+    importance,
+    focus,
+    send,
+    reply,
+    forward,
+  };
+}
+
 async function collectInteractive(): Promise<Config> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
@@ -95,32 +151,7 @@ async function collectInteractive(): Promise<Config> {
     const mailbox = await askRequiredEmail(rl, "Shared mailbox address (e.g. agent@contoso.com)");
 
     printErrLine("\nReading and listing mail is always enabled. Choose any extra capabilities needed:");
-    const markRead = await askYesNo(rl, "  Mark messages as read/unread?", false);
-    const download = await askYesNo(rl, "  Download attachments to disk?", false);
-    const move = await askYesNo(rl, "  Move messages between folders?", false);
-    const copy = await askYesNo(rl, "  Copy messages into another folder?", false);
-    const del = await askYesNo(rl, "  Delete messages?", false);
-    const categorize = await askYesNo(rl, "  Add/remove categories on messages?", false);
-    const flag = await askYesNo(rl, "  Set the follow-up flag on messages?", false);
-    const importance = await askYesNo(rl, "  Set message importance (low/normal/high)?", false);
-    const focus = await askYesNo(rl, "  Reclassify messages as Focused/Other?", false);
-    const send = await askYesNo(rl, "  Send new messages?", false);
-    const reply = await askYesNo(rl, "  Reply to messages?", false);
-    const forward = await askYesNo(rl, "  Forward messages?", false);
-    const capabilities: Capabilities = {
-      markRead,
-      download,
-      move,
-      copy,
-      delete: del,
-      categorize,
-      flag,
-      importance,
-      focus,
-      send,
-      reply,
-      forward,
-    };
+    const capabilities = await collectCapabilities(rl, DEFAULT_CAPABILITIES);
 
     let allowlistGroup: string | undefined;
     if (needsSend(capabilities)) {
@@ -147,6 +178,30 @@ async function collectInteractive(): Promise<Config> {
   } finally {
     rl.close();
   }
+}
+
+/**
+ * `--reconfigure`: re-ask only the capability questions, keeping identity
+ * fields (tenant/client/mailbox/cert paths) untouched. Reuses the existing
+ * allowlistGroup if send/reply/forward was already enabled; only asks for a
+ * fresh one if a submit capability is newly turned on and none is set yet.
+ */
+export async function collectReconfigure(rl: Asker, existing: Config): Promise<Config> {
+  printErrLine(`\n=== Emissary reconfigure: ${existing.mailbox} ===`);
+  printErrLine("Current values are the default below — press Enter to keep them.");
+  const capabilities = await collectCapabilities(rl, existing.capabilities);
+
+  let allowlistGroup = existing.allowlistGroup;
+  if (needsSend(capabilities) && !allowlistGroup) {
+    allowlistGroup = await askRequiredEmail(
+      rl,
+      "Allowlist group address (e.g. emissary-allowed@contoso.com)",
+    );
+  }
+
+  const cfg: Config = { ...existing, capabilities };
+  if (allowlistGroup) cfg.allowlistGroup = allowlistGroup;
+  return validateConfig(cfg);
 }
 
 // --------------------------------------------------------------------------
@@ -302,14 +357,51 @@ async function stepFinish(): Promise<StepResult> {
 // Entry
 // --------------------------------------------------------------------------
 
+/** Steps a --reconfigure run treats as already satisfied (identity/cert didn't change). */
+export const RECONFIGURE_KEEP: readonly OnboardingStep[] = ["prereqs", "collect", "cert"];
+/** Steps a --reconfigure run always re-verifies, per "always re-run everything on a capability change." */
+export const RECONFIGURE_REVERIFY: readonly OnboardingStep[] = [
+  "render-handoff",
+  "verify-token",
+  "verify-read",
+  "verify-negative",
+  "verify-allowlist",
+  "finish",
+];
+
 export async function initCommand(args: string[]): Promise<number> {
   const p = parseArgs(args, ["config"]);
   const configFile = strFlag(p, "config");
+  const reconfigure = boolFlag(p, "reconfigure");
   const interactive = !configFile && Boolean(process.stdin.isTTY);
   const state = await loadOnboarding();
 
-  // Non-interactive: ingest and persist the supplied config, satisfying collect.
-  if (configFile) {
+  if (reconfigure && configFile) {
+    printJson(errorResult("--reconfigure and --config are mutually exclusive"));
+    return 1;
+  }
+
+  if (reconfigure) {
+    if (!interactive) {
+      printJson(errorResult("emissary init --reconfigure requires an interactive terminal"));
+      return 1;
+    }
+    // Throws a clear "no config found — run `emissary init` first" if this
+    // identity was never set up; reconfigure only makes sense on top of one.
+    const existing = await loadConfig();
+    const rl = createInterface({ input: process.stdin, output: process.stderr });
+    let updated: Config;
+    try {
+      updated = await collectReconfigure(rl, existing);
+    } finally {
+      rl.close();
+    }
+    await saveConfig(updated);
+    printErrLine(`Config updated at ${configDir()}/config.json`);
+    for (const step of RECONFIGURE_KEEP) await markStep(state, step, "done");
+    for (const step of RECONFIGURE_REVERIFY) await markStep(state, step, "pending");
+  } else if (configFile) {
+    // Non-interactive: ingest and persist the supplied config, satisfying collect.
     const raw = await Bun.file(configFile).json();
     // validateConfig fills default cert/key paths when the file omits them.
     const cfg = validateConfig(raw);

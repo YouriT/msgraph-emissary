@@ -166,6 +166,15 @@ Non-interactive setup (e.g. CI/config-management) is supported via
 `emissary init --config file.json`, using the same verification gates —
 see the `Config` fields in [`src/types.ts`](src/types.ts) for the required shape.
 
+**Changed your mind about a capability later?** (e.g. you now trust the agent
+enough to let it move messages.) You don't need to redo the whole wizard —
+run `emissary init --reconfigure`. It re-asks only the capability questions
+(tenant/client/mailbox/cert stay untouched), regenerates the admin pack with
+the new combined role/permission set (still idempotent — the admin just
+re-runs `setup-admin.ps1`), and re-verifies everything with `doctor` before
+calling it done. Interactive only, and only on an identity that's already
+been through `init` once.
+
 ### 5. Use it
 
 ```bash
