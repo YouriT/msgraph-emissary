@@ -8,19 +8,12 @@
  * back, so concurrent unrelated categories aren't clobbered.
  */
 
-import { parseArgs, strFlag } from "../args.ts";
+import { csvFlag, parseArgs } from "../args.ts";
 import { loadConfig } from "../config.ts";
 import { Graph, usersPath } from "../graph.ts";
 import { resolveMessageId } from "../mail.ts";
 import { errorResult, printJson } from "../output.ts";
 import type { GraphMessage } from "../types.ts";
-
-function splitList(raw: string | undefined): string[] {
-  return (raw ?? "")
-    .split(",")
-    .map((c) => c.trim())
-    .filter((c) => c.length > 0);
-}
 
 /** Pure merge logic (unit-tested directly): apply add/remove as a set over the current categories. */
 export function applyCategoryChanges(current: string[], toAdd: string[], toRemove: string[]): string[] {
@@ -33,8 +26,8 @@ export function applyCategoryChanges(current: string[], toAdd: string[], toRemov
 export async function categorizeCommand(args: string[]): Promise<number> {
   const p = parseArgs(args, ["add", "remove"]);
   const given = p.positionals[0];
-  const toAdd = splitList(strFlag(p, "add"));
-  const toRemove = splitList(strFlag(p, "remove"));
+  const toAdd = csvFlag(p, "add");
+  const toRemove = csvFlag(p, "remove");
   if (!given || (toAdd.length === 0 && toRemove.length === 0)) {
     printJson(errorResult('usage: emissary categorize <id> [--add "Cat1,Cat2"] [--remove "Cat3"]'));
     return 1;

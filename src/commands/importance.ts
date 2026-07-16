@@ -3,15 +3,8 @@
 import { parseArgs, strFlag } from "../args.ts";
 import { loadConfig } from "../config.ts";
 import { Graph, usersPath } from "../graph.ts";
-import { resolveMessageId } from "../mail.ts";
+import { isImportanceLevel, resolveMessageId, VALID_IMPORTANCE_LEVELS } from "../mail.ts";
 import { errorResult, printJson } from "../output.ts";
-
-const VALID_LEVELS = ["low", "normal", "high"] as const;
-type ImportanceLevel = (typeof VALID_LEVELS)[number];
-
-function isImportanceLevel(v: string): v is ImportanceLevel {
-  return (VALID_LEVELS as readonly string[]).includes(v);
-}
 
 export async function importanceCommand(args: string[]): Promise<number> {
   const p = parseArgs(args, ["level"]);
@@ -22,7 +15,9 @@ export async function importanceCommand(args: string[]): Promise<number> {
     return 1;
   }
   if (!isImportanceLevel(level)) {
-    printJson(errorResult(`invalid --level "${level}"`, `must be one of: ${VALID_LEVELS.join(", ")}`));
+    printJson(
+      errorResult(`invalid --level "${level}"`, `must be one of: ${VALID_IMPORTANCE_LEVELS.join(", ")}`),
+    );
     return 1;
   }
   const cfg = await loadConfig();

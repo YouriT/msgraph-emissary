@@ -18,6 +18,9 @@ Auth is app-only with a certificate; there is no user, no `/me`, no password.
 
 ## Golden rules
 
+- **Run `emissary capabilities` first.** It's free (no Graph call — just
+  reads local config) and tells you exactly what this identity is allowed
+  to do, up front. Don't discover your permissions by trial and error.
 - **This identity may not have every capability.** Listing/viewing mail is
   always enabled; `markRead`, `download`, `move`, `copy`, `delete`,
   `categorize`, `flag`, `importance`, `focus`, `send`, `reply`, and `forward`
@@ -37,9 +40,16 @@ Auth is app-only with a certificate; there is no user, no `/me`, no password.
 ## Commands
 
 ```
-emissary inbox [--top N] [--folder NAME]      # recent messages
-emissary unread [--top N]                     # unread only
-emissary search --query "invoice" [--top N]   # full-text search
+emissary capabilities                         # what this identity is allowed to do — run this first
+
+emissary inbox [--top N] [--folder NAME] [--category "A,B"] [--from addr] [--has-attachments] [--importance low|normal|high]
+emissary unread [--top N] [same filters as inbox]
+emissary search --query "invoice" [--top N] [same filters as inbox]
+# --category is OR-matched (any of the given names). --from/--has-attachments/--importance
+# run as a native filter for inbox/unread; for search they ride along as KQL clauses
+# (Graph won't combine $search with $filter for messages) — except --category, which
+# isn't KQL-searchable and is applied client-side on the returned page instead.
+
 emissary read <id>                            # full message; marks read only if capabilities.markRead
 emissary folders                              # folders + counts
 emissary stats                                # mailbox totals

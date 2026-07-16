@@ -38,6 +38,7 @@ const COMMANDS: Record<string, () => Promise<Handler>> = {
   focus: async () => (await import("./commands/focus.ts")).focusCommand,
   stats: async () => (await import("./commands/stats.ts")).statsCommand,
   allowlist: async () => (await import("./commands/allowlist.ts")).allowlistCommand,
+  capabilities: async () => (await import("./commands/capabilities.ts")).capabilitiesCommand,
 };
 
 const USAGE = `emissary <command> [args]
@@ -46,10 +47,10 @@ Setup:
   init                     Resumable onboarding wizard (cert, admin pack, verification)
   doctor                   Self-test: token, mailbox read, negative test, allowlist
 
-Read:
-  inbox [--top N] [--folder NAME]
-  unread [--top N]
-  search --query "..." [--top N]
+Read (all four list filters below work on inbox/unread/search):
+  inbox [--top N] [--folder NAME] [--category "A,B"] [--from addr] [--has-attachments] [--importance low|normal|high]
+  unread [--top N] [--folder NAME] [--category ...] [--from ...] [--has-attachments] [--importance ...]
+  search --query "..." [--top N] [--folder NAME] [--category ...] [--from ...] [--has-attachments] [--importance ...]
   read <id>
   folders
   stats
@@ -70,7 +71,8 @@ Send (always runs the allowlist preflight; no override flag exists):
   forward <id> --to a@x [--comment "..."]
 
 Governance:
-  allowlist                Show the resolved allowlist members
+  capabilities              What this identity is allowed to do — check this first
+  allowlist                 Show the resolved allowlist members
 `;
 
 async function main(): Promise<number> {

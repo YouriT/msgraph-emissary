@@ -63,3 +63,13 @@ export function numFlag(parsed: ParsedArgs, name: string, def: number): number {
 export function boolFlag(parsed: ParsedArgs, name: string): boolean {
   return parsed.flags[name] === true || parsed.flags[name] === "true";
 }
+
+/** Read a comma-separated flag value as a trimmed, non-empty list (e.g. `--category "A, B"`). */
+export function csvFlag(parsed: ParsedArgs, name: string): string[] {
+  const raw = strFlag(parsed, name);
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}

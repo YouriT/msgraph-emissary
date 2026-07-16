@@ -169,9 +169,19 @@ see the `Config` fields in [`src/types.ts`](src/types.ts) for the required shape
 ### 5. Use it
 
 ```bash
+./emissary capabilities   # what this identity is allowed to do — check this first
 ./emissary inbox
+./emissary inbox --category "Follow up" --from boss@contoso.com --has-attachments --importance high
 ./emissary send --to approved@contoso.com --subject "hi" --body "..."  # only if send is enabled
 ```
+
+`inbox`/`unread`/`search` all support `--category`, `--from`, `--has-attachments`,
+and `--importance` filters. `--category` is OR-matched (any of the given names)
+since Graph silently returns nothing if you try to AND categories together.
+The others run as a native Graph `$filter` for `inbox`/`unread`; for `search`
+they ride along as KQL clauses instead (Graph won't combine `$search` with
+`$filter` at all for messages), except `--category`, which isn't a
+KQL-searchable property and is applied client-side on the returned page.
 
 To give an **agent** this mailbox identity, point it at [`SKILL.md`](SKILL.md) —
 it documents the commands, the allowlist behavior, and the untrusted-content

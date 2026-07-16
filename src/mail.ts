@@ -7,6 +7,7 @@
  * the same, injection-safe way via the `Graph` client.
  */
 
+import { boolFlag, csvFlag, type ParsedArgs, strFlag } from "./args.ts";
 import { type Graph, GraphHttpError, usersPath } from "./graph.ts";
 import { shortId } from "./output.ts";
 import { renderBody } from "./sanitize.ts";
@@ -18,6 +19,13 @@ import type {
   GraphMessage,
   GraphRecipient,
 } from "./types.ts";
+
+/** The message `importance` enum, shared by importance.ts (setting it) and the list filters (querying by it). */
+export const VALID_IMPORTANCE_LEVELS = ["low", "normal", "high"] as const;
+export type ImportanceLevel = (typeof VALID_IMPORTANCE_LEVELS)[number];
+export function isImportanceLevel(v: string): v is ImportanceLevel {
+  return (VALID_IMPORTANCE_LEVELS as readonly string[]).includes(v);
+}
 
 /** Split a `--to`/`--cc` value into individual addresses (comma/semicolon). */
 export function parseRecipients(raw: string | undefined): string[] {
@@ -43,7 +51,7 @@ export class NotFoundError extends Error {}
 
 /** Fields we request for message summaries — keep payloads small. */
 const SUMMARY_SELECT =
-  "id,subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,hasAttachments,bodyPreview";
+  "id,subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,hasAttachments,bodyPreview,categories,importance";
 const FULL_SELECT = `${SUMMARY_SELECT},body,webLink,conversationId,parentFolderId`;
 
 function addr(r: { emailAddress: { name?: string; address?: string } } | undefined): string | undefined {
@@ -60,6 +68,8 @@ export interface MessageSummary {
   received: string | undefined;
   unread: boolean;
   hasAttachments: boolean;
+  categories: string[];
+  importance: string | undefined;
   preview: string;
 }
 
@@ -73,6 +83,8 @@ export function projectSummary(m: GraphMessage): MessageSummary {
     received: m.receivedDateTime ?? m.sentDateTime,
     unread: m.isRead === false,
     hasAttachments: m.hasAttachments === true,
+    categories: m.categories ?? [],
+    importance: m.importance,
     preview: (m.bodyPreview ?? "").slice(0, 140),
   };
 }
@@ -99,17 +111,78 @@ export function projectFull(m: GraphMessage): Record<string, unknown> {
   };
 }
 
+/** The filter-flag subset shared by inbox/unread/search: --category/--from/--has-attachments/--importance. */
+export type ListFilterFlags = Pick<ListOptions, "categories" | "from" | "hasAttachments" | "importance">;
+
+/**
+ * Parse the filter flags shared by inbox/unread/search. Returns the invalid
+ * raw value under `invalidImportance` instead of throwing, since each caller
+ * prints its own errorResult and needs the exact command name in the message.
+ */
+export function parseListFilterFlags(
+  p: ParsedArgs,
+): { flags: ListFilterFlags } | { invalidImportance: string } {
+  const importanceRaw = strFlag(p, "importance");
+  if (importanceRaw !== undefined && !isImportanceLevel(importanceRaw)) {
+    return { invalidImportance: importanceRaw };
+  }
+  const from = strFlag(p, "from");
+  const flags: ListFilterFlags = { categories: csvFlag(p, "category") };
+  if (from) flags.from = from;
+  if (boolFlag(p, "has-attachments")) flags.hasAttachments = true;
+  if (importanceRaw) flags.importance = importanceRaw;
+  return { flags };
+}
+
 export interface ListOptions {
   folder?: string;
   search?: string;
   unreadOnly?: boolean;
   top?: number;
+  /** OR-matched: a message with ANY of these categories matches. */
+  categories?: string[];
+  /** Sender address. Exact match in $filter mode; substring in $search (KQL) mode. */
+  from?: string;
+  hasAttachments?: boolean;
+  importance?: ImportanceLevel;
+}
+
+/** Escape a value for a single-quoted OData string literal (doubles embedded quotes). */
+export function odataQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 /**
- * List messages from a folder (or the whole mailbox). Uses $search when a query
- * is given (Graph requires ConsistencyLevel: eventual and forbids $orderby with
- * $search), otherwise $filter/$orderby by receivedDateTime.
+ * The OR-of-any() clause for a set of category names — AND-ing categories
+ * together (`.../any(...) and .../any(...)`) is a known Graph limitation that
+ * silently returns zero results, so this is deliberately "has any of these",
+ * not "has all of these".
+ */
+export function categoryFilterClause(categories: string[]): string {
+  return categories.map((c) => `categories/any(a:a eq ${odataQuote(c)})`).join(" or ");
+}
+
+/** Escape text for a KQL `$search` clause value (Graph's own escaping rule: backslash-escape `"` and `\`). */
+export function kqlEscape(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+/** KQL's `importance:` values are low/medium/high — "medium", not "normal" like the message property's own enum. */
+export function kqlImportance(level: ImportanceLevel): "low" | "medium" | "high" {
+  return level === "normal" ? "medium" : level;
+}
+
+/**
+ * List messages from a folder (or the whole mailbox).
+ *
+ * Uses $search (KQL) when a free-text query is given; Graph does not allow
+ * $search to combine with $filter or $orderby for messages at all, so any
+ * structured predicate (from/hasAttachments/importance) rides along as an
+ * ANDed KQL clause instead. Categories aren't a KQL-searchable property, so
+ * they're applied client-side on the returned page in $search mode.
+ *
+ * Otherwise builds a single ANDed $filter (unreadOnly, from, hasAttachments,
+ * importance, categories) plus $orderby by receivedDateTime.
  */
 export async function listMessages(graph: Graph, cfg: Config, opts: ListOptions): Promise<GraphMessage[]> {
   const top = Math.min(Math.max(opts.top ?? 20, 1), 100);
@@ -118,21 +191,33 @@ export async function listMessages(graph: Graph, cfg: Config, opts: ListOptions)
     : usersPath(cfg.mailbox, "messages");
 
   if (opts.search) {
-    // $search cannot combine with $orderby; results come back by relevance.
+    const clauses = [`"${kqlEscape(opts.search)}"`];
+    if (opts.from) clauses.push(`"from:${kqlEscape(opts.from)}"`);
+    if (opts.hasAttachments !== undefined) clauses.push(`"hasAttachments:${opts.hasAttachments}"`);
+    if (opts.importance) clauses.push(`"importance:${kqlImportance(opts.importance)}"`);
     const res = await graph.get<GraphCollection<GraphMessage>>(
       base,
-      { $search: `"${opts.search.replace(/"/g, '\\"')}"`, $select: SUMMARY_SELECT, $top: top },
+      { $search: clauses.join(" AND "), $select: SUMMARY_SELECT, $top: top },
       { ConsistencyLevel: "eventual" },
     );
-    return res.value;
+    if (!opts.categories?.length) return res.value;
+    const wanted = new Set(opts.categories);
+    return res.value.filter((m) => (m.categories ?? []).some((c) => wanted.has(c)));
   }
+
+  const filters: string[] = [];
+  if (opts.unreadOnly) filters.push("isRead eq false");
+  if (opts.from) filters.push(`from/emailAddress/address eq ${odataQuote(opts.from)}`);
+  if (opts.hasAttachments !== undefined) filters.push(`hasAttachments eq ${opts.hasAttachments}`);
+  if (opts.importance) filters.push(`importance eq ${odataQuote(opts.importance)}`);
+  if (opts.categories?.length) filters.push(`(${categoryFilterClause(opts.categories)})`);
 
   const query: Record<string, string | number> = {
     $select: SUMMARY_SELECT,
     $top: top,
     $orderby: "receivedDateTime desc",
   };
-  if (opts.unreadOnly) query.$filter = "isRead eq false";
+  if (filters.length > 0) query.$filter = filters.join(" and ");
   const res = await graph.get<GraphCollection<GraphMessage>>(base, query);
   return res.value;
 }
